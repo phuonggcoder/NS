@@ -1,0 +1,10 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/((?!assets/|site\\.html|published-spec\\.json|clients/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
