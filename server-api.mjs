@@ -1,42 +1,44 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import {
+  applySecurityHeaders,
+  changeAdminPassword,
+  checkRateLimit,
+  clearSessionCookie,
+  createSessionCookie,
+  getAuthState,
+  isRequestAuthenticated,
+  setupFirstAdminPassword,
+  verifyAdminPassword,
+} from './server-auth.mjs';
+import {
+  getPublishedSite,
+  getStorageMode,
+  listPublishedSites,
+  sanitizeSlug,
+  savePublishedSite,
+  storeGet,
+  storeSet,
+} from './server-store.mjs';
 
-const MAX_BODY_BYTES = 15 * 1024 * 1024;
+const MAX_ADMIN_BODY_BYTES = 15 * 1024 * 1024;
+const MAX_PUBLIC_BODY_BYTES = 64 * 1024;
 
-export function sanitizeSlug(raw) {
-  if (typeof raw !== 'string') return null;
-  const cleaned = raw.trim().toLowerCase();
-  if (!cleaned || cleaned.length > 60 || !/^[a-z0-9-]+$/.test(cleaned)) {
-    return null;
-  }
-  return cleaned;
-}
-
-export function resolveSafeChild(baseDir, ...segments) {
-  const base = path.resolve(baseDir);
-  const target = path.resolve(base, ...segments);
-  if (target !== base && !target.startsWith(base + path.sep)) {
-    throw new Error('Đường dẫn không hợp lệ.');
-  }
-  return target;
-}
-
-function sendJson(res, statusCode, payload) {
+function sendJson(res, statusCode, payload, req = null) {
+  if (req) applySecurityHeaders(res, req);
   res.statusCode = statusCode;
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   res.end(JSON.stringify(payload));
 }
 
-function readJsonBody(req) {
+function readJsonBody(req, maxBytes = MAX_ADMIN_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let totalBytes = 0;
 
     req.on('data', (chunk) => {
       totalBytes += chunk.length;
-      if (totalBytes > MAX_BODY_BYTES) {
-        reject(new Error('Dữ liệu vượt quá giới hạn 15MB.'));
+      if (totalBytes > maxBytes) {
+        reject(Object.assign(new Error('Dữ liệu gửi lên vượt quá giới hạn cho phép.'), { statusCode: 413 }));
         req.destroy();
         return;
       }
@@ -48,7 +50,7 @@ function readJsonBody(req) {
         const raw = Buffer.concat(chunks).toString('utf8');
         resolve(raw ? JSON.parse(raw) : {});
       } catch {
-        reject(new Error('Payload JSON không hợp lệ.'));
+        reject(Object.assign(new Error('Payload JSON không hợp lệ.'), { statusCode: 400 }));
       }
     });
 
@@ -56,18 +58,77 @@ function readJsonBody(req) {
   });
 }
 
-async function readJsonFile(filePath, fallback) {
-  try {
-    const raw = await fs.promises.readFile(filePath, 'utf8');
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
+function enforceRateLimit(req, res, bucket, limit, windowMs) {
+  const result = checkRateLimit(req, bucket, limit, windowMs);
+  if (!result.allowed) {
+    res.setHeader('Retry-After', String(result.retryAfterSec));
+    sendJson(
+      res,
+      429,
+      {
+        ok: false,
+        error: `Bạn thao tác quá nhanh. Vui lòng thử lại sau ${result.retryAfterSec} giây.`,
+      },
+      req
+    );
+    return false;
   }
+  return true;
 }
 
-async function writeJsonFile(filePath, data) {
-  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+async function requireAdmin(req, res, rootDir) {
+  const authed = await isRequestAuthenticated(req, rootDir);
+  if (!authed) {
+    sendJson(res, 401, { ok: false, error: 'Phiên đăng nhập hết hạn hoặc chưa đăng nhập.' }, req);
+    return false;
+  }
+  return enforceRateLimit(req, res, 'admin-api', 120, 60 * 1000);
+}
+
+export async function handlePublishedAssetRequest(req, res, rootDir = process.cwd()) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return false;
+  }
+
+  const urlObj = new URL(req.url || '/', 'http://localhost');
+  const pathname = decodeURIComponent(urlObj.pathname);
+
+  let slug = null;
+  let kind = null; // 'html' | 'spec'
+
+  if (pathname === '/site.html') {
+    kind = 'html';
+  } else if (pathname === '/published-spec.json') {
+    kind = 'spec';
+  } else {
+    const clientHtmlMatch = pathname.match(/^\/clients\/([a-z0-9-]+)(?:\/|\/index\.html)?$/);
+    const clientSpecMatch = pathname.match(/^\/clients\/([a-z0-9-]+)\/spec\.json$/);
+    if (clientHtmlMatch) {
+      slug = sanitizeSlug(clientHtmlMatch[1]);
+      kind = 'html';
+    } else if (clientSpecMatch) {
+      slug = sanitizeSlug(clientSpecMatch[1]);
+      kind = 'spec';
+    }
+  }
+
+  if (!kind) return false;
+
+  const site = await getPublishedSite(slug, rootDir);
+  if (!site) return false;
+
+  applySecurityHeaders(res, req);
+  res.statusCode = 200;
+  res.setHeader('Cache-Control', 'no-cache');
+
+  if (kind === 'spec') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(req.method === 'HEAD' ? '' : JSON.stringify(site.spec, null, 2));
+  } else {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.end(req.method === 'HEAD' ? '' : site.html);
+  }
+  return true;
 }
 
 export async function handleApiRequest(req, res, options = {}) {
@@ -79,88 +140,161 @@ export async function handleApiRequest(req, res, options = {}) {
     return false;
   }
 
-  const publicDir = path.resolve(rootDir, 'public');
-  const dataDir = path.resolve(rootDir, 'data');
+  applySecurityHeaders(res, req);
 
   try {
+    // 1. Health Check (Public)
     if (pathname === '/api/health' && req.method === 'GET') {
+      const state = await getAuthState(rootDir);
       sendJson(res, 200, {
         ok: true,
         service: 'specpage-studio',
+        storageMode: getStorageMode(),
+        authConfigured: state.configured,
         time: new Date().toISOString(),
       });
       return true;
     }
 
-    if (pathname === '/api/clients' && req.method === 'GET') {
-      const clientsRoot = path.join(publicDir, 'clients');
-      let items = [];
-      try {
-        const entries = await fs.promises.readdir(clientsRoot, { withFileTypes: true });
-        for (const entry of entries) {
-          if (!entry.isDirectory()) continue;
-          const slug = sanitizeSlug(entry.name);
-          if (!slug) continue;
-          const specPath = path.join(clientsRoot, slug, 'spec.json');
-          const specData = await readJsonFile(specPath, null);
-          items.push({
-            slug,
-            title: specData?.meta?.title || slug,
-            updatedAt: specData?.updatedAt || null,
-            url: `/clients/${slug}/index.html`,
-            specUrl: `/clients/${slug}/spec.json`,
-          });
-        }
-      } catch {
-        items = [];
-      }
-      sendJson(res, 200, { ok: true, clients: items });
-      return true;
-    }
-
-    if (pathname === '/api/publish' && req.method === 'POST') {
-      const body = await readJsonBody(req);
-      if (!body || typeof body.html !== 'string' || !body.spec || typeof body.spec !== 'object') {
-        sendJson(res, 400, { ok: false, error: 'Thiếu trường spec hoặc html hợp lệ.' });
-        return true;
-      }
-
-      await fs.promises.mkdir(publicDir, { recursive: true });
-      await Promise.all([
-        fs.promises.writeFile(path.join(publicDir, 'site.html'), body.html, 'utf8'),
-        writeJsonFile(path.join(publicDir, 'published-spec.json'), body.spec),
-      ]);
-
-      let clientUrl;
-      const slug = body.slug ? sanitizeSlug(body.slug) : null;
-      if (body.slug && !slug) {
-        sendJson(res, 400, { ok: false, error: 'Slug khách hàng chỉ được chứa a-z, 0-9 và dấu -.' });
-        return true;
-      }
-
-      if (slug) {
-        const clientDir = resolveSafeChild(publicDir, 'clients', slug);
-        await fs.promises.mkdir(clientDir, { recursive: true });
-        await Promise.all([
-          fs.promises.writeFile(path.join(clientDir, 'index.html'), body.html, 'utf8'),
-          writeJsonFile(path.join(clientDir, 'spec.json'), body.spec),
-        ]);
-        clientUrl = `/clients/${slug}/index.html`;
-      }
-
+    // 2. Auth Status / Setup / Login / Logout / Change Password
+    if (pathname === '/api/auth/status' && req.method === 'GET') {
+      const state = await getAuthState(rootDir);
+      const authenticated = await isRequestAuthenticated(req, rootDir);
       sendJson(res, 200, {
         ok: true,
-        siteUrl: '/site.html',
-        specUrl: '/published-spec.json',
-        clientUrl,
+        configured: state.configured,
+        envManaged: state.envManaged,
+        authenticated,
+        storageMode: getStorageMode(),
       });
       return true;
     }
 
-    if (pathname === '/api/feedback') {
-      const feedbackPath = path.join(dataDir, 'feedback.json');
+    if (pathname === '/api/auth/setup' && req.method === 'POST') {
+      if (!enforceRateLimit(req, res, 'auth-login', 10, 15 * 60 * 1000)) return true;
+      const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
+      const result = await setupFirstAdminPassword(body.password, rootDir);
+      if (!result.ok) {
+        sendJson(res, result.status || 400, { ok: false, error: result.error });
+        return true;
+      }
+      const cookie = await createSessionCookie(req, body.rememberMe !== false, rootDir);
+      res.setHeader('Set-Cookie', cookie);
+      sendJson(res, 200, { ok: true, configured: true, authenticated: true });
+      return true;
+    }
+
+    if (pathname === '/api/auth/login' && req.method === 'POST') {
+      if (!enforceRateLimit(req, res, 'auth-login', 10, 15 * 60 * 1000)) return true;
+      const state = await getAuthState(rootDir);
+      if (!state.configured) {
+        sendJson(res, 400, {
+          ok: false,
+          error: 'Chưa thiết lập mật khẩu quản trị. Hãy tạo mật khẩu lần đầu.',
+        });
+        return true;
+      }
+      const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
+      const valid = await verifyAdminPassword(body.password, rootDir);
+      if (!valid) {
+        sendJson(res, 401, { ok: false, error: 'Mật khẩu quản trị không đúng.' });
+        return true;
+      }
+      const cookie = await createSessionCookie(req, body.rememberMe !== false, rootDir);
+      res.setHeader('Set-Cookie', cookie);
+      sendJson(res, 200, { ok: true, authenticated: true });
+      return true;
+    }
+
+    if (pathname === '/api/auth/logout' && req.method === 'POST') {
+      res.setHeader('Set-Cookie', clearSessionCookie(req));
+      sendJson(res, 200, { ok: true });
+      return true;
+    }
+
+    if (pathname === '/api/auth/change-password' && req.method === 'POST') {
+      if (!(await requireAdmin(req, res, rootDir))) return true;
+      const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
+      const result = await changeAdminPassword(body.currentPassword, body.nextPassword, rootDir);
+      if (!result.ok) {
+        sendJson(res, result.status || 400, { ok: false, error: result.error });
+        return true;
+      }
+      sendJson(res, 200, { ok: true });
+      return true;
+    }
+
+    // 3. Projects Sync (Admin Only)
+    if (pathname === '/api/projects') {
+      if (!(await requireAdmin(req, res, rootDir))) return true;
+
       if (req.method === 'GET') {
-        const all = await readJsonFile(feedbackPath, []);
+        const stored = await storeGet('projects', null, rootDir);
+        sendJson(res, 200, {
+          ok: true,
+          storageMode: getStorageMode(),
+          projects: Array.isArray(stored?.projects) ? stored.projects : null,
+          activeProjectId: typeof stored?.activeProjectId === 'string' ? stored.activeProjectId : null,
+          updatedAt: stored?.updatedAt || null,
+        });
+        return true;
+      }
+
+      if (req.method === 'PUT') {
+        const body = await readJsonBody(req, MAX_ADMIN_BODY_BYTES);
+        if (!body || !Array.isArray(body.projects) || typeof body.activeProjectId !== 'string') {
+          sendJson(res, 400, { ok: false, error: 'Dữ liệu dự án không hợp lệ.' });
+          return true;
+        }
+        const payload = {
+          projects: body.projects,
+          activeProjectId: body.activeProjectId,
+          updatedAt: new Date().toISOString(),
+        };
+        await storeSet('projects', payload, rootDir);
+        sendJson(res, 200, {
+          ok: true,
+          storageMode: getStorageMode(),
+          updatedAt: payload.updatedAt,
+        });
+        return true;
+      }
+    }
+
+    // 4. Published Clients & Publish (Admin Only)
+    if (pathname === '/api/clients' && req.method === 'GET') {
+      if (!(await requireAdmin(req, res, rootDir))) return true;
+      const clients = await listPublishedSites(rootDir);
+      sendJson(res, 200, { ok: true, clients });
+      return true;
+    }
+
+    if (pathname === '/api/publish' && req.method === 'POST') {
+      if (!(await requireAdmin(req, res, rootDir))) return true;
+      const body = await readJsonBody(req, MAX_ADMIN_BODY_BYTES);
+      if (!body || typeof body.html !== 'string' || !body.spec || typeof body.spec !== 'object') {
+        sendJson(res, 400, { ok: false, error: 'Thiếu trường spec hoặc html hợp lệ.' });
+        return true;
+      }
+      if (body.slug && !sanitizeSlug(body.slug)) {
+        sendJson(res, 400, { ok: false, error: 'Slug khách hàng chỉ được chứa a-z, 0-9 và dấu -.' });
+        return true;
+      }
+
+      const result = await savePublishedSite(body.slug || null, body.spec, body.html, rootDir);
+      sendJson(res, 200, {
+        ok: true,
+        storageMode: getStorageMode(),
+        ...result,
+      });
+      return true;
+    }
+
+    // 5. Client Feedback (POST is public & rate-limited for clients; GET is Admin Only)
+    if (pathname === '/api/feedback') {
+      if (req.method === 'GET') {
+        if (!(await requireAdmin(req, res, rootDir))) return true;
+        const all = (await storeGet('feedback', [], rootDir)) || [];
         const slugParam = urlObj.searchParams.get('slug');
         const items = slugParam
           ? all.filter((f) => f.clientSlug === slugParam)
@@ -168,8 +302,10 @@ export async function handleApiRequest(req, res, options = {}) {
         sendJson(res, 200, { ok: true, items });
         return true;
       }
+
       if (req.method === 'POST') {
-        const body = await readJsonBody(req);
+        if (!enforceRateLimit(req, res, 'public-submit', 20, 10 * 60 * 1000)) return true;
+        const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
         if (!body || typeof body.comment !== 'string' || !body.comment.trim()) {
           sendJson(res, 400, { ok: false, error: 'Thiếu nội dung góp ý.' });
           return true;
@@ -184,18 +320,22 @@ export async function handleApiRequest(req, res, options = {}) {
           type: body.type === 'approved' ? 'approved' : 'feedback',
           resolved: false,
         };
-        const current = await readJsonFile(feedbackPath, []);
+        const current = (await storeGet('feedback', [], rootDir)) || [];
         const next = [entry, ...(Array.isArray(current) ? current : [])].slice(0, 300);
-        await writeJsonFile(feedbackPath, next);
+        await storeSet('feedback', next, rootDir);
         sendJson(res, 200, { ok: true, item: entry });
         return true;
       }
     }
 
+    // 6. Customer Orders & Leads (POST is public & rate-limited for shoppers; GET/DELETE are Admin Only)
     if (pathname === '/api/orders') {
-      const ordersPath = path.join(dataDir, 'orders.json');
       if (req.method === 'GET') {
-        const data = await readJsonFile(ordersPath, { orders: [], leads: [] });
+        if (!(await requireAdmin(req, res, rootDir))) return true;
+        const data = (await storeGet('orders', { orders: [], leads: [] }, rootDir)) || {
+          orders: [],
+          leads: [],
+        };
         const slugParam = urlObj.searchParams.get('slug');
         if (slugParam) {
           sendJson(res, 200, {
@@ -208,9 +348,21 @@ export async function handleApiRequest(req, res, options = {}) {
         }
         return true;
       }
+
+      if (req.method === 'DELETE') {
+        if (!(await requireAdmin(req, res, rootDir))) return true;
+        await storeSet('orders', { orders: [], leads: [] }, rootDir);
+        sendJson(res, 200, { ok: true });
+        return true;
+      }
+
       if (req.method === 'POST') {
-        const body = await readJsonBody(req);
-        const current = await readJsonFile(ordersPath, { orders: [], leads: [] });
+        if (!enforceRateLimit(req, res, 'public-submit', 20, 10 * 60 * 1000)) return true;
+        const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
+        const current = (await storeGet('orders', { orders: [], leads: [] }, rootDir)) || {
+          orders: [],
+          leads: [],
+        };
         const orders = Array.isArray(current.orders) ? current.orders : [];
         const leads = Array.isArray(current.leads) ? current.leads : [];
 
@@ -224,10 +376,10 @@ export async function handleApiRequest(req, res, options = {}) {
             email: String(body.email || '').slice(0, 120),
             message: String(body.message || '').slice(0, 1500),
           };
-          await writeJsonFile(ordersPath, {
+          await storeSet('orders', {
             orders,
             leads: [lead, ...leads].slice(0, 300),
-          });
+          }, rootDir);
         } else {
           const order = {
             id: typeof body.id === 'string' ? body.id : `ord-${Date.now().toString(36)}`,
@@ -243,10 +395,10 @@ export async function handleApiRequest(req, res, options = {}) {
             email: String(body.email || '').slice(0, 120),
             note: String(body.note || '').slice(0, 1000),
           };
-          await writeJsonFile(ordersPath, {
+          await storeSet('orders', {
             orders: [order, ...orders].slice(0, 300),
             leads,
-          });
+          }, rootDir);
         }
 
         sendJson(res, 200, { ok: true });
@@ -257,8 +409,9 @@ export async function handleApiRequest(req, res, options = {}) {
     sendJson(res, 404, { ok: false, error: 'API endpoint không tồn tại.' });
     return true;
   } catch (err) {
+    const status = err && typeof err === 'object' && 'statusCode' in err ? err.statusCode : 500;
     const message = err instanceof Error ? err.message : 'Lỗi máy chủ nội bộ.';
-    sendJson(res, 500, { ok: false, error: message });
+    sendJson(res, status, { ok: false, error: message });
     return true;
   }
 }

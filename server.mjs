@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { handleApiRequest, resolveSafeChild } from './server-api.mjs';
+import { handleApiRequest, handlePublishedAssetRequest } from './server-api.mjs';
+import { applySecurityHeaders } from './server-auth.mjs';
+import { getStorageMode, resolveSafeChild } from './server-store.mjs';
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -42,17 +44,22 @@ async function tryResolveStaticFile(baseDir, urlPath) {
   return null;
 }
 
-async function sendFile(res, filePath, isAsset) {
+async function sendFile(res, req, filePath, isAsset) {
   const ext = path.extname(filePath).toLowerCase();
   const mime = MIME_TYPES[ext] || 'application/octet-stream';
   const cacheHeader = isAsset
     ? 'public, max-age=31536000, immutable'
     : 'no-cache';
 
+  applySecurityHeaders(res, req);
   res.statusCode = 200;
   res.setHeader('Content-Type', mime);
   res.setHeader('Cache-Control', cacheHeader);
-  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
 
   const stream = fs.createReadStream(filePath);
   stream.on('error', () => {
@@ -65,8 +72,14 @@ async function sendFile(res, filePath, isAsset) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const handledApi = await handleApiRequest(req, res, { rootDir: ROOT_DIR });
-  if (handledApi) return;
+  if (await handleApiRequest(req, res, { rootDir: ROOT_DIR })) {
+    return;
+  }
+
+  // Serve published client sites & specs from persistent store (survives ephemeral disk wipes)
+  if (await handlePublishedAssetRequest(req, res, ROOT_DIR)) {
+    return;
+  }
 
   const urlObj = new URL(req.url || '/', 'http://localhost');
   const pathname = decodeURIComponent(urlObj.pathname);
@@ -77,36 +90,36 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 1. Check public/ first (published client landing pages, site.html, published-spec.json)
   if (pathname !== '/') {
     const publicMatch = await tryResolveStaticFile(PUBLIC_DIR, pathname);
     if (publicMatch) {
-      await sendFile(res, publicMatch, false);
+      await sendFile(res, req, publicMatch, false);
       return;
     }
   }
 
-  // 2. Check built Vite bundle in dist/
   const distPath = pathname === '/' ? '/index.html' : pathname;
   const distMatch = await tryResolveStaticFile(DIST_DIR, distPath);
   if (distMatch) {
-    await sendFile(res, distMatch, pathname.startsWith('/assets/'));
+    await sendFile(res, req, distMatch, pathname.startsWith('/assets/'));
     return;
   }
 
-  // 3. SPA fallback to dist/index.html for HTML navigations
   if (!path.extname(pathname)) {
     const spaIndex = path.join(DIST_DIR, 'index.html');
     if (fs.existsSync(spaIndex)) {
-      await sendFile(res, spaIndex, false);
+      await sendFile(res, req, spaIndex, false);
       return;
     }
   }
 
+  applySecurityHeaders(res, req);
   res.statusCode = 404;
   res.end('Not Found');
 });
 
 server.listen(PORT, HOST, () => {
-  console.log(`SpecPage Production Server đang chạy tại http://localhost:${PORT}/`);
+  console.log(
+    `SpecPage Production Server đang chạy tại http://localhost:${PORT}/ (Storage: ${getStorageMode()})`
+  );
 });

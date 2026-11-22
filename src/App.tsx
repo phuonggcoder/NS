@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getTemplateSpec } from './data/templates';
 import { LandingPage } from './renderer/LandingPage';
+import { AuthGate } from './studio/AuthGate';
 import { ClientReviewBar } from './studio/ClientReviewBar';
 import { StudioApp } from './studio/StudioApp';
 import type { LandingPageSpec } from './types/spec';
@@ -169,7 +170,13 @@ export function App() {
     );
   }
 
-  return <StudioApp />;
+  return (
+    <AuthGate>
+      {({ authStatus, onLoggedOut }) => (
+        <StudioApp authStatus={authStatus} onLoggedOut={onLoggedOut} />
+      )}
+    </AuthGate>
+  );
 }
 
 export default App;

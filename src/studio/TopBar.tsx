@@ -1,10 +1,12 @@
 import {
+  Cloud,
   Code2,
   ExternalLink,
   FolderKanban,
   Globe,
   Monitor,
   Redo2,
+  ShieldCheck,
   ShoppingBag,
   Smartphone,
   Sparkles,
@@ -12,6 +14,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import type { ClientProject, ViewportMode } from '../types/spec';
+import type { StorageMode } from '../utils/auth';
 import { PROJECT_STATUS_META } from '../utils/projects';
 
 interface TopBarProps {
@@ -26,10 +29,13 @@ interface TopBarProps {
   leadsCount: number;
   aiIssuesCount: number;
   aiPanelOpen: boolean;
+  syncStatus: 'idle' | 'saving' | 'saved' | 'offline';
+  storageMode: StorageMode;
   onToggleAiPanel: () => void;
   onOpenProjects: () => void;
   onOpenOrders: () => void;
   onOpenSpecModal: () => void;
+  onOpenSecurity: () => void;
   onOpenPublishModal: () => void;
 }
 
@@ -45,14 +51,26 @@ export function TopBar({
   leadsCount,
   aiIssuesCount,
   aiPanelOpen,
+  syncStatus,
+  storageMode,
   onToggleAiPanel,
   onOpenProjects,
   onOpenOrders,
   onOpenSpecModal,
+  onOpenSecurity,
   onOpenPublishModal,
 }: TopBarProps) {
   const totalInbox = ordersCount + leadsCount;
   const statusMeta = PROJECT_STATUS_META[activeProject.status];
+
+  const syncLabel =
+    syncStatus === 'saving'
+      ? 'Đang lưu...'
+      : syncStatus === 'saved'
+      ? storageMode === 'upstash' || storageMode === 'supabase'
+        ? 'Đã lưu Cloud'
+        : 'Đã lưu Server'
+      : 'Lưu cục bộ';
 
   return (
     <header className="st-topbar">
@@ -73,7 +91,7 @@ export function TopBar({
           <FolderKanban size={14} />
           <span
             style={{
-              maxWidth: 130,
+              maxWidth: 118,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -93,6 +111,14 @@ export function TopBar({
             {statusMeta.label}
           </span>
         </button>
+
+        <span
+          className="st-sync-pill"
+          title="Trạng thái đồng bộ & ghi nhớ dữ liệu"
+        >
+          <Cloud size={12} />
+          <span>{syncLabel}</span>
+        </span>
       </div>
 
       <div className="st-center-tools">
@@ -154,7 +180,7 @@ export function TopBar({
           title="AI tự động điền thông tin & kiểm tra sửa lỗi"
         >
           <Sparkles size={15} />
-          <span>AI Trợ lý</span>
+          <span>AI</span>
           {aiIssuesCount > 0 && (
             <span
               className="st-badge-count"
@@ -178,12 +204,20 @@ export function TopBar({
 
         <button
           type="button"
-          className="st-btn"
+          className="st-btn st-btn-icon"
           onClick={onOpenSpecModal}
           title="Xem và chỉnh sửa Spec Kit (JSON & spec.md)"
         >
           <Code2 size={15} />
-          <span>Spec</span>
+        </button>
+
+        <button
+          type="button"
+          className="st-btn st-btn-icon"
+          onClick={onOpenSecurity}
+          title="Bảo mật, mật khẩu & lưu trữ Cloud"
+        >
+          <ShieldCheck size={15} />
         </button>
 
         <a

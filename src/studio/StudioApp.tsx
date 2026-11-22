@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, CheckCircle2, Eye, Layers, LayoutTemplate, Palette, X } from 'lucide-react';
 import type { AiSuggestion } from '../ai/aiTypes';
 import { runLocalAudit } from '../ai/localAuditor';
@@ -19,6 +19,13 @@ import type {
   SectionType,
   ViewportMode,
 } from '../types/spec';
+import {
+  clearOrdersOnServer,
+  fetchProjectsFromServer,
+  saveProjectsToServer,
+  type AuthStatusResponse,
+  type StorageMode,
+} from '../utils/auth';
 import {
   createClientProject,
   duplicateClientProject,
@@ -41,6 +48,7 @@ import { SectionInspector } from './inspector/SectionInspector';
 import { OrdersDrawer } from './OrdersDrawer';
 import { ProjectsDrawer } from './ProjectsDrawer';
 import { PublishModal } from './PublishModal';
+import { SecurityModal } from './SecurityModal';
 import { SpecModal } from './SpecModal';
 import { StructurePanel } from './StructurePanel';
 import { TemplatesSpecPanel } from './TemplatesSpecPanel';
@@ -51,7 +59,12 @@ type LeftTab = 'structure' | 'design' | 'templates';
 
 const MAX_HISTORY = 40;
 
-export function StudioApp() {
+interface StudioAppProps {
+  authStatus?: AuthStatusResponse;
+  onLoggedOut?: () => void;
+}
+
+export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
   const [projectsState, setProjectsState] = useState(() => loadProjectsState());
   const activeProject =
     projectsState.projects.find((p) => p.id === projectsState.activeProjectId) ??
@@ -75,6 +88,16 @@ export function StudioApp() {
     () => spec.sections.find((s) => s.type === 'hero')?.id ?? spec.sections[0]?.id ?? null
   );
 
+  // Cloud / Server Persistence Status
+  const [storageMode, setStorageMode] = useState<StorageMode>(
+    authStatus?.storageMode ?? 'browser'
+  );
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'offline'>(
+    authStatus?.staticFallback ? 'offline' : 'saved'
+  );
+  const hydratedFromServerRef = useRef(false);
+  const syncTimerRef = useRef<number | null>(null);
+
   // AI Workbench & Live Preview State
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[]>(() =>
@@ -91,6 +114,7 @@ export function StudioApp() {
   const [ordersOpen, setOrdersOpen] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
+  const [securityOpen, setSecurityOpen] = useState(false);
 
   const [orders, setOrders] = useState<CustomerOrder[]>(() => loadOrders());
   const [leads, setLeads] = useState<ContactLead[]>(() => loadLeads());
@@ -118,17 +142,112 @@ export function StudioApp() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  // Sync spec into localStorage and active project
+  // Hydrate projects from persistent server/cloud store on initial mount
+  useEffect(() => {
+    if (authStatus?.staticFallback) {
+      hydratedFromServerRef.current = true;
+      setSyncStatus('offline');
+      return;
+    }
+
+    let cancelled = false;
+    void fetchProjectsFromServer().then((res) => {
+      if (cancelled) return;
+      if (res.unauthorized) {
+        onLoggedOut?.();
+        return;
+      }
+      if (res.storageMode) setStorageMode(res.storageMode);
+
+      if (res.ok && res.projects && res.projects.length > 0) {
+        const nextActiveId =
+          res.projects.find((p) => p.id === res.activeProjectId)?.id ?? res.projects[0].id;
+        const activeProj = res.projects.find((p) => p.id === nextActiveId) ?? res.projects[0];
+        saveProjectsState(res.projects, nextActiveId);
+        saveStoredSpec(activeProj.spec);
+        setProjectsState({ projects: res.projects, activeProjectId: nextActiveId });
+        setHistory({ past: [], present: activeProj.spec, future: [] });
+        setAiSuggestions(runLocalAudit(activeProj.spec));
+        setLastPublishedUrl(activeProj.publishedUrl);
+        setSelectedSectionId(
+          activeProj.spec.sections.find((s) => s.type === 'hero')?.id ??
+            activeProj.spec.sections[0]?.id ??
+            null
+        );
+        setSyncStatus('saved');
+      } else if (res.ok) {
+        // Seed server/cloud store with initial local project
+        const local = loadProjectsState();
+        void saveProjectsToServer(local.projects, local.activeProjectId).then((saveRes) => {
+          if (!cancelled && saveRes.ok) setSyncStatus('saved');
+        });
+      }
+      hydratedFromServerRef.current = true;
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus?.staticFallback, onLoggedOut]);
+
+  // Sync spec into localStorage + active project + debounced cloud/server save
   useEffect(() => {
     saveStoredSpec(spec);
+    let latestProjects: ClientProject[] = [];
+    let latestActiveId = '';
+
     setProjectsState((prev) => {
       const nextProjects = updateSpecInProject(prev.projects, prev.activeProjectId, spec);
       saveProjectsState(nextProjects, prev.activeProjectId);
+      latestProjects = nextProjects;
+      latestActiveId = prev.activeProjectId;
       return { ...prev, projects: nextProjects };
     });
-  }, [spec]);
 
-  // Sync orders & leads from localStorage + optional server endpoint
+    if (!hydratedFromServerRef.current || authStatus?.staticFallback) {
+      return;
+    }
+
+    setSyncStatus('saving');
+    if (syncTimerRef.current !== null) {
+      window.clearTimeout(syncTimerRef.current);
+    }
+
+    syncTimerRef.current = window.setTimeout(() => {
+      void saveProjectsToServer(latestProjects, latestActiveId).then((res) => {
+        if (res.unauthorized) {
+          onLoggedOut?.();
+          return;
+        }
+        if (res.storageMode) setStorageMode(res.storageMode);
+        setSyncStatus(res.ok ? 'saved' : 'offline');
+      });
+    }, 900);
+
+    return () => {
+      if (syncTimerRef.current !== null) {
+        window.clearTimeout(syncTimerRef.current);
+      }
+    };
+  }, [spec, authStatus?.staticFallback, onLoggedOut]);
+
+  const flushProjectsToServer = useCallback(
+    (projects: ClientProject[], activeId: string) => {
+      if (authStatus?.staticFallback) return;
+      setSyncStatus('saving');
+      void saveProjectsToServer(projects, activeId).then((res) => {
+        if (res.unauthorized) {
+          onLoggedOut?.();
+          return;
+        }
+        if (res.storageMode) setStorageMode(res.storageMode);
+        setSyncStatus(res.ok ? 'saved' : 'offline');
+      });
+    },
+    [authStatus?.staticFallback, onLoggedOut]
+  );
+
+  // Sync orders & leads from localStorage + authenticated server endpoint
   const syncInbox = useCallback(async () => {
     const localOrders = loadOrders();
     const localLeads = loadLeads();
@@ -136,7 +255,11 @@ export function StudioApp() {
     setLeads(localLeads);
 
     try {
-      const res = await fetch('/api/orders');
+      const res = await fetch('/api/orders', { credentials: 'same-origin' });
+      if (res.status === 401) {
+        onLoggedOut?.();
+        return;
+      }
       if (!res.ok) return;
       const data = (await res.json()) as {
         orders?: CustomerOrder[];
@@ -155,10 +278,10 @@ export function StudioApp() {
     } catch {
       // Ignore offline/static
     }
-  }, []);
+  }, [onLoggedOut]);
 
   useEffect(() => {
-    syncInbox();
+    void syncInbox();
     window.addEventListener('focus', syncInbox);
     window.addEventListener('storage', syncInbox);
     return () => {
@@ -333,6 +456,7 @@ export function StudioApp() {
     );
     setProjectsState((prev) => {
       saveProjectsState(prev.projects, project.id);
+      flushProjectsToServer(prev.projects, project.id);
       return { ...prev, activeProjectId: project.id };
     });
     showToast(`Đang chỉnh sửa dự án: ${project.projectName}`);
@@ -352,6 +476,7 @@ export function StudioApp() {
             publishedUrl: targetUrl,
           });
           saveProjectsState(nextProjects, prev.activeProjectId);
+          flushProjectsToServer(nextProjects, prev.activeProjectId);
           return { ...prev, projects: nextProjects };
         });
         showToast(
@@ -401,13 +526,16 @@ export function StudioApp() {
         leadsCount={leads.length}
         aiIssuesCount={pendingAiCount}
         aiPanelOpen={aiPanelOpen}
+        syncStatus={syncStatus}
+        storageMode={storageMode}
         onToggleAiPanel={() => setAiPanelOpen((prev) => !prev)}
         onOpenProjects={() => setProjectsOpen(true)}
         onOpenOrders={() => {
-          syncInbox();
+          void syncInbox();
           setOrdersOpen(true);
         }}
         onOpenSpecModal={() => setSpecModalOpen(true)}
+        onOpenSecurity={() => setSecurityOpen(true)}
         onOpenPublishModal={() => setPublishOpen(true)}
       />
 
@@ -582,6 +710,7 @@ export function StudioApp() {
         onClearAll={() => {
           clearOrders();
           clearLeads();
+          void clearOrdersOnServer();
           setOrders([]);
           setLeads([]);
           showToast('Đã xóa toàn bộ danh sách đơn & liên hệ.');
@@ -602,6 +731,7 @@ export function StudioApp() {
           setProjectsState((prev) => {
             const next = [created, ...prev.projects];
             saveProjectsState(next, created.id);
+            flushProjectsToServer(next, created.id);
             return { projects: next, activeProjectId: created.id };
           });
           setHistory({ past: [], present: created.spec, future: [] });
@@ -615,6 +745,7 @@ export function StudioApp() {
           setProjectsState((prev) => {
             const next = [copy, ...prev.projects];
             saveProjectsState(next, prev.activeProjectId);
+            flushProjectsToServer(next, prev.activeProjectId);
             return { ...prev, projects: next };
           });
           showToast(`Đã tạo phiên bản sao: ${copy.projectName}`);
@@ -629,6 +760,7 @@ export function StudioApp() {
             activeProjectId: nextActive.id,
           });
           saveProjectsState(remaining, nextActive.id);
+          flushProjectsToServer(remaining, nextActive.id);
           if (id === activeProject.id) {
             setHistory({ past: [], present: nextActive.spec, future: [] });
             setAiSuggestions(runLocalAudit(nextActive.spec));
@@ -641,6 +773,7 @@ export function StudioApp() {
               p.id === id ? { ...p, status, updatedAt: new Date().toISOString() } : p
             );
             saveProjectsState(next, prev.activeProjectId);
+            flushProjectsToServer(next, prev.activeProjectId);
             return { ...prev, projects: next };
           });
         }}
@@ -655,6 +788,14 @@ export function StudioApp() {
         onPublishToServer={handlePublishSite}
         onDownloadHtml={handleDownloadHtml}
         onDownloadSpecJson={handleDownloadSpecJson}
+      />
+
+      <SecurityModal
+        open={securityOpen}
+        storageMode={storageMode}
+        envManaged={Boolean(authStatus?.envManaged)}
+        onClose={() => setSecurityOpen(false)}
+        onLoggedOut={() => onLoggedOut?.()}
       />
 
       {toast && (
