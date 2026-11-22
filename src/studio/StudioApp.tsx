@@ -171,8 +171,8 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         setLastPublishedUrl(activeProj.publishedUrl);
         setSelectedSectionId(
           activeProj.spec.sections.find((s) => s.type === 'hero')?.id ??
-            activeProj.spec.sections[0]?.id ??
-            null
+          activeProj.spec.sections[0]?.id ??
+          null
         );
         setSyncStatus('saved');
       } else if (res.ok) {
@@ -451,8 +451,8 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     setLastPublishedUrl(project.publishedUrl);
     setSelectedSectionId(
       project.spec.sections.find((s) => s.type === 'hero')?.id ??
-        project.spec.sections[0]?.id ??
-        null
+      project.spec.sections[0]?.id ??
+      null
     );
     setProjectsState((prev) => {
       saveProjectsState(prev.projects, project.id);

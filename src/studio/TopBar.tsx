@@ -67,10 +67,10 @@ export function TopBar({
     syncStatus === 'saving'
       ? 'Đang lưu...'
       : syncStatus === 'saved'
-      ? storageMode === 'upstash' || storageMode === 'supabase'
-        ? 'Đã lưu Cloud'
-        : 'Đã lưu Server'
-      : 'Lưu cục bộ';
+        ? storageMode === 'upstash' || storageMode === 'supabase'
+          ? 'Đã lưu Cloud'
+          : 'Đã lưu Server'
+        : 'Lưu cục bộ';
 
   return (
     <header className="st-topbar">
