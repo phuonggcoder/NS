@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { NavbarSection as NavbarSectionData } from '../../types/spec';
 import { sanitizeHref } from '../../utils/storage';
 import { IconRenderer } from '../IconRenderer';
+import { useStudioFieldProps } from '../StudioFocusContext';
 
 interface Props {
   section: NavbarSectionData;
@@ -10,6 +11,15 @@ interface Props {
 
 export function NavbarSection({ section, isStudio }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const logoField = useStudioFieldProps(section.id, 'logoText', 'Logo & Tên thương hiệu', 'lp-brand');
+  const linksField = useStudioFieldProps(section.id, 'links', 'Menu điều hướng', 'lp-nav-links');
+  const ctaField = useStudioFieldProps(
+    section.id,
+    'ctaLabel',
+    'Nút hành động Navbar',
+    'lp-btn lp-btn-primary lp-btn-sm lp-nav-cta-desktop'
+  );
 
   const navClass = [
     'lp-navbar',
@@ -24,15 +34,18 @@ export function NavbarSection({ section, isStudio }: Props) {
       <div className="lp-container lp-nav-inner">
         <a
           href="#top"
-          className="lp-brand"
-          onClick={(e) => isStudio && e.preventDefault()}
+          {...logoField}
+          onClick={(e) => {
+            if (isStudio) e.preventDefault();
+            logoField.onClick?.(e);
+          }}
         >
           {section.logoEmoji && <span className="lp-brand-mark">{section.logoEmoji}</span>}
           <span>{section.logoText}</span>
         </a>
 
         <nav aria-label="Điều hướng chính">
-          <ul className="lp-nav-links">
+          <ul {...linksField}>
             {section.links.map((link) => (
               <li key={link.id}>
                 <a
@@ -51,8 +64,11 @@ export function NavbarSection({ section, isStudio }: Props) {
           {section.ctaLabel && (
             <a
               href={sanitizeHref(section.ctaHref)}
-              className="lp-btn lp-btn-primary lp-btn-sm lp-nav-cta-desktop"
-              onClick={(e) => isStudio && e.preventDefault()}
+              {...ctaField}
+              onClick={(e) => {
+                if (isStudio) e.preventDefault();
+                ctaField.onClick?.(e);
+              }}
             >
               {section.ctaLabel}
             </a>

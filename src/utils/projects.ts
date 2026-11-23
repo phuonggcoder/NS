@@ -161,10 +161,38 @@ export async function submitFeedbackToServer(item: ClientFeedbackItem): Promise<
   }
 }
 
+export function readLocalSpecReadOnly(slugParam: string | null): LandingPageSpec | null {
+  try {
+    const rawProjects = window.localStorage.getItem(PROJECTS_KEY);
+    if (rawProjects) {
+      const parsed = JSON.parse(rawProjects) as ClientProject[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        if (slugParam) {
+          const bySlug = parsed.find((p) => p && p.slug === slugParam);
+          if (bySlug?.spec && Array.isArray(bySlug.spec.sections)) {
+            return bySlug.spec;
+          }
+        } else {
+          const activeId = window.localStorage.getItem(ACTIVE_PROJECT_KEY);
+          const active = parsed.find((p) => p && p.id === activeId) ?? parsed[0];
+          if (active?.spec && Array.isArray(active.spec.sections)) {
+            return active.spec;
+          }
+        }
+      }
+    }
+  } catch {
+    // Ignore invalid JSON
+  }
+  return slugParam ? null : loadStoredSpec();
+}
+
 export async function fetchFeedbackForSlug(slug: string): Promise<ClientFeedbackItem[]> {
   const local = loadLocalFeedback().filter((f) => f.clientSlug === slug);
   try {
-    const res = await fetch(`/api/feedback?slug=${encodeURIComponent(slug)}`);
+    const res = await fetch(`/api/feedback?slug=${encodeURIComponent(slug)}`, {
+      credentials: 'same-origin',
+    });
     if (!res.ok) return local;
     const data = (await res.json()) as { items?: ClientFeedbackItem[] };
     if (!Array.isArray(data.items)) return local;

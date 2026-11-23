@@ -1,8 +1,36 @@
-import type { FeaturesSection as FeaturesSectionData } from '../../types/spec';
+import type { FeatureItem, FeaturesSection as FeaturesSectionData } from '../../types/spec';
 import { IconRenderer } from '../IconRenderer';
+import { useStudioFieldProps } from '../StudioFocusContext';
 
 interface Props {
   section: FeaturesSectionData;
+}
+
+function FeatureCardItem({
+  sectionId,
+  item,
+  idx,
+}: {
+  sectionId: string;
+  item: FeatureItem;
+  idx: number;
+}) {
+  const cardField = useStudioFieldProps(
+    sectionId,
+    `item-${idx}`,
+    `Lợi ích #${idx + 1}`,
+    'lp-card lp-card-hover lp-feature-card'
+  );
+
+  return (
+    <div {...cardField}>
+      <div className="lp-feature-icon">
+        <IconRenderer name={item.icon} size={22} />
+      </div>
+      <h3 className="lp-feature-title">{item.title}</h3>
+      <p className="lp-feature-desc">{item.description}</p>
+    </div>
+  );
 }
 
 export function FeaturesSection({ section }: Props) {
@@ -17,6 +45,10 @@ export function FeaturesSection({ section }: Props) {
       ? 'lp-grid-2'
       : 'lp-grid-3';
 
+  const badgeField = useStudioFieldProps(section.id, 'badge', 'Badge Lợi ích', 'lp-badge');
+  const titleField = useStudioFieldProps(section.id, 'title', 'Tiêu đề Lợi ích', 'lp-heading');
+  const subField = useStudioFieldProps(section.id, 'subtitle', 'Mô tả Lợi ích', 'lp-subtitle');
+
   return (
     <section
       id={section.anchorId || undefined}
@@ -25,21 +57,15 @@ export function FeaturesSection({ section }: Props) {
       <div className="lp-container">
         {(section.badge || section.title || section.subtitle) && (
           <div className="lp-section-header">
-            {section.badge && <div className="lp-badge">{section.badge}</div>}
-            {section.title && <h2 className="lp-heading">{section.title}</h2>}
-            {section.subtitle && <p className="lp-subtitle">{section.subtitle}</p>}
+            {section.badge && <div {...badgeField}>{section.badge}</div>}
+            {section.title && <h2 {...titleField}>{section.title}</h2>}
+            {section.subtitle && <p {...subField}>{section.subtitle}</p>}
           </div>
         )}
 
         <div className={gridClass}>
-          {section.items.map((item) => (
-            <div key={item.id} className="lp-card lp-card-hover lp-feature-card">
-              <div className="lp-feature-icon">
-                <IconRenderer name={item.icon} size={22} />
-              </div>
-              <h3 className="lp-feature-title">{item.title}</h3>
-              <p className="lp-feature-desc">{item.description}</p>
-            </div>
+          {section.items.map((item, idx) => (
+            <FeatureCardItem key={item.id} sectionId={section.id} item={item} idx={idx} />
           ))}
         </div>
       </div>

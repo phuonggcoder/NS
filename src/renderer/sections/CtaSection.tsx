@@ -1,6 +1,7 @@
 import type { CtaSection as CtaSectionData } from '../../types/spec';
 import { sanitizeHref } from '../../utils/storage';
 import { IconRenderer } from '../IconRenderer';
+import { useStudioFieldProps } from '../StudioFocusContext';
 
 interface Props {
   section: CtaSectionData;
@@ -11,6 +12,31 @@ export function CtaSection({ section, isStudio }: Props) {
   const surfaceClass = `lp-surface-${section.style.surface}`;
   const padClass = `lp-pad-${section.style.padding}`;
 
+  const badgeField = useStudioFieldProps(section.id, 'badge', 'Badge CTA', 'lp-badge');
+  const titleField = useStudioFieldProps(
+    section.id,
+    'title',
+    'Tiêu đề CTA',
+    section.variant === 'minimal-band' ? 'lp-heading' : 'lp-heading lp-cta-title'
+  );
+  const subField = useStudioFieldProps(section.id, 'subtitle', 'Mô tả CTA', 'lp-subtitle');
+  const primaryField = useStudioFieldProps(
+    section.id,
+    'primaryLabel',
+    'Nút chính CTA',
+    section.variant === 'minimal-band'
+      ? 'lp-btn lp-btn-primary lp-btn-lg'
+      : 'lp-btn lp-btn-lg lp-cta-btn-primary'
+  );
+  const secondaryField = useStudioFieldProps(
+    section.id,
+    'secondaryLabel',
+    'Nút phụ CTA',
+    section.variant === 'minimal-band'
+      ? 'lp-btn lp-btn-secondary lp-btn-lg'
+      : 'lp-btn lp-btn-lg lp-cta-btn-secondary'
+  );
+
   return (
     <section
       id={section.anchorId || undefined}
@@ -19,10 +45,10 @@ export function CtaSection({ section, isStudio }: Props) {
       <div className="lp-container">
         {section.variant === 'minimal-band' ? (
           <div className="lp-cta-minimal">
-            {section.badge && <div className="lp-badge">{section.badge}</div>}
-            <h2 className="lp-heading">{section.title}</h2>
+            {section.badge && <div {...badgeField}>{section.badge}</div>}
+            <h2 {...titleField}>{section.title}</h2>
             {section.subtitle && (
-              <p className="lp-subtitle" style={{ maxWidth: 620, marginInline: 'auto' }}>
+              <p {...subField} style={{ maxWidth: 620, marginInline: 'auto' }}>
                 {section.subtitle}
               </p>
             )}
@@ -30,8 +56,11 @@ export function CtaSection({ section, isStudio }: Props) {
               {section.primaryLabel && (
                 <a
                   href={sanitizeHref(section.primaryHref)}
-                  className="lp-btn lp-btn-primary lp-btn-lg"
-                  onClick={(e) => isStudio && e.preventDefault()}
+                  {...primaryField}
+                  onClick={(e) => {
+                    if (isStudio) e.preventDefault();
+                    primaryField.onClick?.(e);
+                  }}
                 >
                   <span>{section.primaryLabel}</span>
                   <IconRenderer name="arrow-right" size={18} />
@@ -40,8 +69,11 @@ export function CtaSection({ section, isStudio }: Props) {
               {section.secondaryLabel && (
                 <a
                   href={sanitizeHref(section.secondaryHref)}
-                  className="lp-btn lp-btn-secondary lp-btn-lg"
-                  onClick={(e) => isStudio && e.preventDefault()}
+                  {...secondaryField}
+                  onClick={(e) => {
+                    if (isStudio) e.preventDefault();
+                    secondaryField.onClick?.(e);
+                  }}
                 >
                   {section.secondaryLabel}
                 </a>
@@ -50,15 +82,18 @@ export function CtaSection({ section, isStudio }: Props) {
           </div>
         ) : (
           <div className="lp-cta-card">
-            {section.badge && <div className="lp-badge">{section.badge}</div>}
-            <h2 className="lp-heading lp-cta-title">{section.title}</h2>
-            {section.subtitle && <p className="lp-subtitle">{section.subtitle}</p>}
+            {section.badge && <div {...badgeField}>{section.badge}</div>}
+            <h2 {...titleField}>{section.title}</h2>
+            {section.subtitle && <p {...subField}>{section.subtitle}</p>}
             <div className="lp-cta-actions">
               {section.primaryLabel && (
                 <a
                   href={sanitizeHref(section.primaryHref)}
-                  className="lp-btn lp-btn-lg lp-cta-btn-primary"
-                  onClick={(e) => isStudio && e.preventDefault()}
+                  {...primaryField}
+                  onClick={(e) => {
+                    if (isStudio) e.preventDefault();
+                    primaryField.onClick?.(e);
+                  }}
                 >
                   <span>{section.primaryLabel}</span>
                   <IconRenderer name="arrow-right" size={18} />
@@ -67,8 +102,11 @@ export function CtaSection({ section, isStudio }: Props) {
               {section.secondaryLabel && (
                 <a
                   href={sanitizeHref(section.secondaryHref)}
-                  className="lp-btn lp-btn-lg lp-cta-btn-secondary"
-                  onClick={(e) => isStudio && e.preventDefault()}
+                  {...secondaryField}
+                  onClick={(e) => {
+                    if (isStudio) e.preventDefault();
+                    secondaryField.onClick?.(e);
+                  }}
                 >
                   {section.secondaryLabel}
                 </a>

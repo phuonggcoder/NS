@@ -23,3 +23,10 @@ Inspired by GitHub Spec Kit (`speckit.org`), every feature and rendering artifac
 
 ## 6. Accessibility & Responsive Design
 - Semantic HTML landmarks (`<header>`, `<nav>`, `<main>`, `<section>`, `<footer>`), keyboard-operable modals/accordions, high color contrast across light and dark presets, and touch-friendly targets on mobile viewports.
+
+## 7. Server-First Multi-Browser Live Parity
+- Customer Live (`/?mode=live`) and Client Review (`/?mode=review`) modes MUST resolve the latest specification from the server/store (`/api/public/site` or published `/clients/<slug>/spec.json`) before falling back to read-only browser cache, and MUST never mutate `localStorage` with fabricated default projects.
+
+## 8. True-Width Artboard & Direct Canva-Style Focus
+- Desktop Studio preview MUST render at full desktop viewport width (1280px) inside a zoomable/pannable artboard so Desktop container queries never collapse prematurely.
+- Studio focus/selection frames MUST highlight individual editable elements in Studio only and MUST never leak into Live, Review, Clean Preview, or exported standalone HTML.

@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, CheckCircle2, Eye, Layers, LayoutTemplate, Palette, X } from 'lucide-react';
 import type { AiSuggestion } from '../ai/aiTypes';
 import { runLocalAudit } from '../ai/localAuditor';
-import { createDefaultSection, getTemplateSpec } from '../data/templates';
+import { createDefaultSection, getSectionLabel, getTemplateSpec } from '../data/templates';
 import {
   buildStandaloneHtml,
   downloadTextFile,
   publishSiteToServer,
 } from '../exporter/exportHtml';
 import { LandingPage } from '../renderer/LandingPage';
+import { StudioFocusProvider } from '../renderer/StudioFocusContext';
 import type {
   ClientProject,
   ContactLead,
@@ -43,6 +44,7 @@ import {
   saveStoredSpec,
 } from '../utils/storage';
 import { AiAssistantPanel } from './AiAssistantPanel';
+import { CanvasStage, type CanvasStageHandle } from './CanvasStage';
 import { DesignPanel } from './DesignPanel';
 import { SectionInspector } from './inspector/SectionInspector';
 import { OrdersDrawer } from './OrdersDrawer';
@@ -66,6 +68,9 @@ interface StudioAppProps {
 
 export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
   const [projectsState, setProjectsState] = useState(() => loadProjectsState());
+  const projectsRef = useRef(projectsState);
+  projectsRef.current = projectsState;
+
   const activeProject =
     projectsState.projects.find((p) => p.id === projectsState.activeProjectId) ??
     projectsState.projects[0];
@@ -84,9 +89,19 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
 
   const [leftTab, setLeftTab] = useState<LeftTab>('structure');
   const [viewport, setViewport] = useState<ViewportMode>('desktop');
+  const [leftPanelOpen, setLeftPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [cleanPreview, setCleanPreview] = useState(false);
   const [selectedSectionId, setSelectedSectionId] = useState<string | null>(
     () => spec.sections.find((s) => s.type === 'hero')?.id ?? spec.sections[0]?.id ?? null
   );
+  const [activeFocus, setActiveFocus] = useState<{
+    sectionId: string;
+    fieldKey: string | null;
+    fieldLabel: string;
+  } | null>(null);
+  const canvasRef = useRef<CanvasStageHandle>(null);
+  const suppressAutoPanRef = useRef(false);
 
   // Cloud / Server Persistence Status
   const [storageMode, setStorageMode] = useState<StorageMode>(
@@ -142,6 +157,16 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
+  const applyProjectsState = useCallback(
+    (nextProjects: ClientProject[], nextActiveId: string) => {
+      const nextState = { projects: nextProjects, activeProjectId: nextActiveId };
+      projectsRef.current = nextState;
+      saveProjectsState(nextProjects, nextActiveId);
+      setProjectsState(nextState);
+    },
+    []
+  );
+
   // Hydrate projects from persistent server/cloud store on initial mount
   useEffect(() => {
     if (authStatus?.staticFallback) {
@@ -163,16 +188,16 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         const nextActiveId =
           res.projects.find((p) => p.id === res.activeProjectId)?.id ?? res.projects[0].id;
         const activeProj = res.projects.find((p) => p.id === nextActiveId) ?? res.projects[0];
-        saveProjectsState(res.projects, nextActiveId);
         saveStoredSpec(activeProj.spec);
-        setProjectsState({ projects: res.projects, activeProjectId: nextActiveId });
+        applyProjectsState(res.projects, nextActiveId);
         setHistory({ past: [], present: activeProj.spec, future: [] });
         setAiSuggestions(runLocalAudit(activeProj.spec));
         setLastPublishedUrl(activeProj.publishedUrl);
+        setActiveFocus(null);
         setSelectedSectionId(
           activeProj.spec.sections.find((s) => s.type === 'hero')?.id ??
-          activeProj.spec.sections[0]?.id ??
-          null
+            activeProj.spec.sections[0]?.id ??
+            null
         );
         setSyncStatus('saved');
       } else if (res.ok) {
@@ -188,21 +213,15 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     return () => {
       cancelled = true;
     };
-  }, [authStatus?.staticFallback, onLoggedOut]);
+  }, [applyProjectsState, authStatus?.staticFallback, onLoggedOut]);
 
   // Sync spec into localStorage + active project + debounced cloud/server save
   useEffect(() => {
     saveStoredSpec(spec);
-    let latestProjects: ClientProject[] = [];
-    let latestActiveId = '';
-
-    setProjectsState((prev) => {
-      const nextProjects = updateSpecInProject(prev.projects, prev.activeProjectId, spec);
-      saveProjectsState(nextProjects, prev.activeProjectId);
-      latestProjects = nextProjects;
-      latestActiveId = prev.activeProjectId;
-      return { ...prev, projects: nextProjects };
-    });
+    const current = projectsRef.current;
+    const nextProjects = updateSpecInProject(current.projects, current.activeProjectId, spec);
+    const targetActiveId = current.activeProjectId;
+    applyProjectsState(nextProjects, targetActiveId);
 
     if (!hydratedFromServerRef.current || authStatus?.staticFallback) {
       return;
@@ -214,7 +233,8 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     }
 
     syncTimerRef.current = window.setTimeout(() => {
-      void saveProjectsToServer(latestProjects, latestActiveId).then((res) => {
+      syncTimerRef.current = null;
+      void saveProjectsToServer(nextProjects, targetActiveId).then((res) => {
         if (res.unauthorized) {
           onLoggedOut?.();
           return;
@@ -229,10 +249,14 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         window.clearTimeout(syncTimerRef.current);
       }
     };
-  }, [spec, authStatus?.staticFallback, onLoggedOut]);
+  }, [spec, applyProjectsState, authStatus?.staticFallback, onLoggedOut]);
 
   const flushProjectsToServer = useCallback(
     (projects: ClientProject[], activeId: string) => {
+      if (syncTimerRef.current !== null) {
+        window.clearTimeout(syncTimerRef.current);
+        syncTimerRef.current = null;
+      }
       if (authStatus?.staticFallback) return;
       setSyncStatus('saving');
       void saveProjectsToServer(projects, activeId).then((res) => {
@@ -246,6 +270,26 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     },
     [authStatus?.staticFallback, onLoggedOut]
   );
+
+  const flushSyncNow = useCallback(async () => {
+    if (syncTimerRef.current !== null) {
+      window.clearTimeout(syncTimerRef.current);
+      syncTimerRef.current = null;
+    }
+    if (authStatus?.staticFallback) return;
+    const { projects, activeProjectId } = projectsRef.current;
+    const latestProjects = updateSpecInProject(projects, activeProjectId, spec);
+    applyProjectsState(latestProjects, activeProjectId);
+    saveStoredSpec(spec);
+    setSyncStatus('saving');
+    const res = await saveProjectsToServer(latestProjects, activeProjectId);
+    if (res.unauthorized) {
+      onLoggedOut?.();
+      return;
+    }
+    if (res.storageMode) setStorageMode(res.storageMode);
+    setSyncStatus(res.ok ? 'saved' : 'offline');
+  }, [applyProjectsState, authStatus?.staticFallback, onLoggedOut, spec]);
 
   // Sync orders & leads from localStorage + authenticated server endpoint
   const syncInbox = useCallback(async () => {
@@ -350,19 +394,70 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [handleUndo, handleRedo]);
 
-  const scrollToCanvasSection = (id: string) => {
-    window.requestAnimationFrame(() => {
-      const el = document.querySelector(`[data-lp-section-id="${id}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
-  };
+  const focusCanvasTarget = useCallback((id: string, fieldKey?: string | null) => {
+    canvasRef.current?.focusTarget(id, fieldKey);
+  }, []);
 
   const handleSelectSection = (id: string) => {
     setSelectedSectionId(id);
+    setActiveFocus((prev) => (prev && prev.sectionId === id ? prev : null));
     if (aiPanelOpen && !previewState) {
       setAiPanelOpen(false);
     }
   };
+
+  const handleFocusFromCanvas = useCallback(
+    (sectionId: string, fieldKey: string, fieldLabel: string) => {
+      setSelectedSectionId(sectionId);
+      setActiveFocus({ sectionId, fieldKey, fieldLabel });
+      if (aiPanelOpen && !previewState) {
+        setAiPanelOpen(false);
+      }
+      setRightPanelOpen(true);
+      window.setTimeout(() => {
+        const fieldEl = document.querySelector(
+          `.st-inspector [data-inspector-field="${fieldKey}"]`
+        ) as HTMLElement | null;
+        if (fieldEl) {
+          fieldEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          const focusable = fieldEl.querySelector(
+            'input, textarea, select'
+          ) as HTMLElement | null;
+          if (focusable) {
+            suppressAutoPanRef.current = true;
+            focusable.focus({ preventScroll: true });
+            window.setTimeout(() => {
+              suppressAutoPanRef.current = false;
+            }, 20);
+          }
+        }
+      }, 45);
+    },
+    [aiPanelOpen, previewState]
+  );
+
+  const handleFocusFromInspector = useCallback(
+    (fieldKey: string, fieldLabel: string) => {
+      if (!selectedSectionId) return;
+      setActiveFocus({ sectionId: selectedSectionId, fieldKey, fieldLabel });
+      if (suppressAutoPanRef.current) {
+        suppressAutoPanRef.current = false;
+        return;
+      }
+      canvasRef.current?.focusTarget(selectedSectionId, fieldKey);
+    },
+    [selectedSectionId]
+  );
+
+  const handleJumpToFocus = useCallback(() => {
+    if (activeFocus) {
+      canvasRef.current?.focusTarget(activeFocus.sectionId, activeFocus.fieldKey);
+      return;
+    }
+    if (selectedSectionId) {
+      canvasRef.current?.focusTarget(selectedSectionId, null);
+    }
+  }, [activeFocus, selectedSectionId]);
 
   const handleReorderSection = (fromIndex: number, toIndex: number) => {
     const nextSections = [...spec.sections];
@@ -423,8 +518,10 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     }
     commitSpec({ ...spec, sections: nextSections });
     setSelectedSectionId(created.id);
+    setActiveFocus(null);
     setAiPanelOpen(false);
-    scrollToCanvasSection(created.id);
+    setRightPanelOpen(true);
+    focusCanvasTarget(created.id);
     showToast('Đã thêm khối mới vào trang.');
   };
 
@@ -437,48 +534,51 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     const nextSpec = getTemplateSpec(templateId);
     commitSpec(nextSpec);
     setPreviewState(null);
+    setActiveFocus(null);
     setAiSuggestions(runLocalAudit(nextSpec));
-    setSelectedSectionId(
-      nextSpec.sections.find((s) => s.type === 'hero')?.id ?? nextSpec.sections[0]?.id ?? null
-    );
+    const nextId =
+      nextSpec.sections.find((s) => s.type === 'hero')?.id ?? nextSpec.sections[0]?.id ?? null;
+    setSelectedSectionId(nextId);
+    if (nextId) focusCanvasTarget(nextId);
     showToast('Đã áp dụng mẫu giao diện mới.');
   };
 
   const switchActiveProject = (project: ClientProject) => {
     setPreviewState(null);
+    setActiveFocus(null);
     setHistory({ past: [], present: project.spec, future: [] });
     setAiSuggestions(runLocalAudit(project.spec));
     setLastPublishedUrl(project.publishedUrl);
     setSelectedSectionId(
       project.spec.sections.find((s) => s.type === 'hero')?.id ??
-      project.spec.sections[0]?.id ??
-      null
+        project.spec.sections[0]?.id ??
+        null
     );
-    setProjectsState((prev) => {
-      saveProjectsState(prev.projects, project.id);
-      flushProjectsToServer(prev.projects, project.id);
-      return { ...prev, activeProjectId: project.id };
-    });
+    applyProjectsState(projectsRef.current.projects, project.id);
+    flushProjectsToServer(projectsRef.current.projects, project.id);
     showToast(`Đang chỉnh sửa dự án: ${project.projectName}`);
   };
 
   const handlePublishSite = async () => {
     setIsPublishing(true);
     try {
+      await flushSyncNow();
       const html = buildStandaloneHtml(spec, activeProject.slug);
       const res = await publishSiteToServer(spec, html, activeProject.slug);
+      if (res.unauthorized) {
+        onLoggedOut?.();
+        return;
+      }
       if (res.ok) {
         const targetUrl = res.clientUrl || res.siteUrl || '/site.html';
         setLastPublishedUrl(targetUrl);
-        setProjectsState((prev) => {
-          const nextProjects = updateSpecInProject(prev.projects, prev.activeProjectId, spec, {
-            status: 'published',
-            publishedUrl: targetUrl,
-          });
-          saveProjectsState(nextProjects, prev.activeProjectId);
-          flushProjectsToServer(nextProjects, prev.activeProjectId);
-          return { ...prev, projects: nextProjects };
+        const current = projectsRef.current;
+        const nextProjects = updateSpecInProject(current.projects, current.activeProjectId, spec, {
+          status: 'published',
+          publishedUrl: targetUrl,
         });
+        applyProjectsState(nextProjects, current.activeProjectId);
+        flushProjectsToServer(nextProjects, current.activeProjectId);
         showToast(
           'Đã xuất bản trang khách hàng thành công!',
           targetUrl,
@@ -511,13 +611,20 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
   const displaySpec = previewState?.spec ?? spec;
   const selectedSection = displaySpec.sections.find((s) => s.id === selectedSectionId) ?? null;
   const pendingAiCount = aiSuggestions.filter((s) => s.status === 'pending').length;
+  const currentActiveFieldKey =
+    activeFocus && activeFocus.sectionId === selectedSectionId ? activeFocus.fieldKey : null;
+  const currentActiveFieldLabel =
+    activeFocus && activeFocus.sectionId === selectedSectionId ? activeFocus.fieldLabel : null;
+  const activeFocusTrail = currentActiveFieldLabel
+    ? `${selectedSection ? getSectionLabel(selectedSection.type) : 'Khối'} · ${currentActiveFieldLabel}`
+    : selectedSection
+      ? getSectionLabel(selectedSection.type)
+      : null;
 
   return (
     <div className="st-shell">
       <TopBar
         activeProject={activeProject}
-        viewport={viewport}
-        onViewportChange={setViewport}
         canUndo={history.past.length > 0}
         canRedo={history.future.length > 0}
         onUndo={handleUndo}
@@ -526,9 +633,21 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         leadsCount={leads.length}
         aiIssuesCount={pendingAiCount}
         aiPanelOpen={aiPanelOpen}
+        leftPanelOpen={leftPanelOpen}
+        rightPanelOpen={rightPanelOpen}
         syncStatus={syncStatus}
         storageMode={storageMode}
-        onToggleAiPanel={() => setAiPanelOpen((prev) => !prev)}
+        activeFocusTrail={activeFocusTrail}
+        onJumpToFocus={handleJumpToFocus}
+        onToggleLeftPanel={() => setLeftPanelOpen((prev) => !prev)}
+        onToggleRightPanel={() => setRightPanelOpen((prev) => !prev)}
+        onToggleAiPanel={() =>
+          setAiPanelOpen((prev) => {
+            const next = !prev;
+            if (next) setRightPanelOpen(true);
+            return next;
+          })
+        }
         onOpenProjects={() => setProjectsOpen(true)}
         onOpenOrders={() => {
           void syncInbox();
@@ -536,119 +655,163 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         }}
         onOpenSpecModal={() => setSpecModalOpen(true)}
         onOpenSecurity={() => setSecurityOpen(true)}
-        onOpenPublishModal={() => setPublishOpen(true)}
+        onOpenLivePreview={async () => {
+          await flushSyncNow();
+          window.open(
+            `/?mode=live&from=studio&slug=${encodeURIComponent(activeProject.slug)}`,
+            '_blank',
+            'noopener,noreferrer'
+          );
+        }}
+        onOpenPublishModal={() => {
+          void flushSyncNow();
+          setPublishOpen(true);
+        }}
       />
 
-      <div className="st-workspace">
-        <aside className="st-sidebar">
-          <div className="st-panel-tabs">
-            <button
-              type="button"
-              className={`st-tab-btn ${leftTab === 'structure' ? 'is-active' : ''}`}
-              onClick={() => setLeftTab('structure')}
-            >
-              <Layers size={14} />
-              <span>Cấu trúc</span>
-            </button>
-            <button
-              type="button"
-              className={`st-tab-btn ${leftTab === 'design' ? 'is-active' : ''}`}
-              onClick={() => setLeftTab('design')}
-            >
-              <Palette size={14} />
-              <span>Thiết kế</span>
-            </button>
-            <button
-              type="button"
-              className={`st-tab-btn ${leftTab === 'templates' ? 'is-active' : ''}`}
-              onClick={() => setLeftTab('templates')}
-            >
-              <LayoutTemplate size={14} />
-              <span>Mẫu & SEO</span>
-            </button>
-          </div>
+      <div
+        className={`st-workspace ${!leftPanelOpen ? 'is-left-hidden' : ''} ${
+          !rightPanelOpen ? 'is-right-hidden' : ''
+        }`}
+      >
+        {leftPanelOpen && (
+          <aside className="st-sidebar">
+            <div className="st-panel-tabs">
+              <button
+                type="button"
+                className={`st-tab-btn ${leftTab === 'structure' ? 'is-active' : ''}`}
+                onClick={() => setLeftTab('structure')}
+              >
+                <Layers size={14} />
+                <span>Cấu trúc</span>
+              </button>
+              <button
+                type="button"
+                className={`st-tab-btn ${leftTab === 'design' ? 'is-active' : ''}`}
+                onClick={() => setLeftTab('design')}
+              >
+                <Palette size={14} />
+                <span>Thiết kế</span>
+              </button>
+              <button
+                type="button"
+                className={`st-tab-btn ${leftTab === 'templates' ? 'is-active' : ''}`}
+                onClick={() => setLeftTab('templates')}
+              >
+                <LayoutTemplate size={14} />
+                <span>Mẫu & SEO</span>
+              </button>
+            </div>
 
-          <div className="st-scroll-body">
-            {leftTab === 'structure' && (
-              <StructurePanel
-                sections={spec.sections}
-                selectedSectionId={selectedSectionId}
-                onSelectSection={(id) => {
-                  setSelectedSectionId(id);
-                  scrollToCanvasSection(id);
-                }}
-                onReorderSection={handleReorderSection}
-                onMoveSection={handleMoveSection}
-                onToggleVisible={handleToggleVisible}
-                onDuplicateSection={handleDuplicateSection}
-                onDeleteSection={handleDeleteSection}
-                onAddSection={handleAddSection}
-              />
-            )}
-            {leftTab === 'design' && (
-              <DesignPanel
-                theme={spec.theme}
-                onChangeTheme={(theme) => commitSpec({ ...spec, theme })}
-              />
-            )}
-            {leftTab === 'templates' && (
-              <TemplatesSpecPanel
-                currentTemplateId={spec.templateId}
-                meta={spec.meta}
-                onSelectTemplate={handleSelectTemplate}
-                onUpdateMeta={(meta) => commitSpec({ ...spec, meta })}
-                onImportSpec={(imported) => {
-                  commitSpec(imported);
-                  setAiSuggestions(runLocalAudit(imported));
-                  setSelectedSectionId(imported.sections[0]?.id ?? null);
-                  showToast('Đã nhập file Spec thành công.');
-                }}
-                onResetDefault={() => handleSelectTemplate('creator-store')}
-              />
-            )}
-          </div>
-        </aside>
+            <div className="st-scroll-body">
+              {leftTab === 'structure' && (
+                <StructurePanel
+                  sections={spec.sections}
+                  selectedSectionId={selectedSectionId}
+                  onSelectSection={(id) => {
+                    setSelectedSectionId(id);
+                    setActiveFocus(null);
+                    focusCanvasTarget(id);
+                  }}
+                  onReorderSection={handleReorderSection}
+                  onMoveSection={handleMoveSection}
+                  onToggleVisible={handleToggleVisible}
+                  onDuplicateSection={handleDuplicateSection}
+                  onDeleteSection={handleDeleteSection}
+                  onAddSection={handleAddSection}
+                />
+              )}
+              {leftTab === 'design' && (
+                <DesignPanel
+                  theme={spec.theme}
+                  onChangeTheme={(theme) => commitSpec({ ...spec, theme })}
+                />
+              )}
+              {leftTab === 'templates' && (
+                <TemplatesSpecPanel
+                  currentTemplateId={spec.templateId}
+                  meta={spec.meta}
+                  onSelectTemplate={handleSelectTemplate}
+                  onUpdateMeta={(meta) => commitSpec({ ...spec, meta })}
+                  onImportSpec={(imported) => {
+                    commitSpec(imported);
+                    setActiveFocus(null);
+                    setAiSuggestions(runLocalAudit(imported));
+                    const nextId = imported.sections[0]?.id ?? null;
+                    setSelectedSectionId(nextId);
+                    if (nextId) focusCanvasTarget(nextId);
+                    showToast('Đã nhập file Spec thành công.');
+                  }}
+                  onResetDefault={() => handleSelectTemplate('creator-store')}
+                />
+              )}
+            </div>
+          </aside>
+        )}
 
-        <main className="st-canvas-stage" onClick={() => setSelectedSectionId(null)}>
-          <div className={`st-canvas-frame is-${viewport}`}>
-            {previewState && (
-              <div className="st-preview-banner">
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <Eye size={16} />
-                  <span>{previewState.label}</span>
-                </div>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button
-                    type="button"
-                    className="st-btn st-btn-sm st-btn-primary"
-                    onClick={() => {
-                      const applied = previewState.spec;
-                      setPreviewState(null);
-                      commitSpec(applied);
-                      setAiSuggestions(runLocalAudit(applied));
-                      showToast('Đã chấp nhận bản chỉnh sửa từ AI.');
-                    }}
-                  >
-                    <Check size={13} />
-                    <span>Chấp nhận</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="st-btn st-btn-sm"
-                    onClick={() => setPreviewState(null)}
-                  >
-                    <X size={13} />
-                    <span>Thoát xem thử</span>
-                  </button>
-                </div>
+        <CanvasStage
+          ref={canvasRef}
+          viewport={viewport}
+          cleanPreview={cleanPreview}
+          canJumpToFocus={Boolean(activeFocus || selectedSectionId)}
+          activeFocusLabel={activeFocusTrail}
+          onViewportChange={setViewport}
+          onToggleCleanPreview={() => setCleanPreview((prev) => !prev)}
+          onJumpToFocus={handleJumpToFocus}
+          onBackgroundClick={() => {
+            setSelectedSectionId(null);
+            setActiveFocus(null);
+          }}
+        >
+          {previewState && (
+            <div className="st-preview-banner">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Eye size={16} />
+                <span>{previewState.label}</span>
               </div>
-            )}
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  className="st-btn st-btn-sm st-btn-primary"
+                  onClick={() => {
+                    const applied = previewState.spec;
+                    setPreviewState(null);
+                    commitSpec(applied);
+                    setAiSuggestions(runLocalAudit(applied));
+                    showToast('Đã chấp nhận bản chỉnh sửa từ AI.');
+                  }}
+                >
+                  <Check size={13} />
+                  <span>Chấp nhận</span>
+                </button>
+                <button
+                  type="button"
+                  className="st-btn st-btn-sm"
+                  onClick={() => setPreviewState(null)}
+                >
+                  <X size={13} />
+                  <span>Thoát xem thử</span>
+                </button>
+              </div>
+            </div>
+          )}
 
+          <StudioFocusProvider
+            value={{
+              isStudio: true,
+              cleanPreview,
+              selectedSectionId,
+              activeFieldKey: currentActiveFieldKey,
+              activeFieldLabel: currentActiveFieldLabel,
+              onFocusField: handleFocusFromCanvas,
+            }}
+          >
             <LandingPage
               spec={displaySpec}
               clientSlug={activeProject.slug}
               editorProps={{
                 selectedSectionId,
+                cleanPreview,
                 previewHighlightSectionId: previewState?.highlightSectionId,
                 onSelectSection: handleSelectSection,
                 onMoveSection: handleMoveSection,
@@ -657,38 +820,42 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
                 onDeleteSection: handleDeleteSection,
               }}
             />
-          </div>
-        </main>
+          </StudioFocusProvider>
+        </CanvasStage>
 
-        {aiPanelOpen ? (
-          <AiAssistantPanel
-            spec={spec}
-            isPreviewing={Boolean(previewState)}
-            previewLabel={previewState?.label}
-            onStartPreview={(previewSpec, label, highlightSectionId) => {
-              setPreviewState({ spec: previewSpec, label, highlightSectionId });
-              if (highlightSectionId) scrollToCanvasSection(highlightSectionId);
-            }}
-            onStopPreview={() => setPreviewState(null)}
-            onApplySpec={(nextSpec, msg) => {
-              commitSpec(nextSpec);
-              setAiSuggestions(runLocalAudit(nextSpec));
-              showToast(msg);
-            }}
-            onClose={() => {
-              setPreviewState(null);
-              setAiPanelOpen(false);
-            }}
-            suggestions={aiSuggestions}
-            onSetSuggestions={setAiSuggestions}
-          />
-        ) : (
-          <SectionInspector
-            section={selectedSection}
-            onUpdateSection={handleUpdateSection}
-            onDeleteSection={handleDeleteSection}
-          />
-        )}
+        {rightPanelOpen &&
+          (aiPanelOpen ? (
+            <AiAssistantPanel
+              spec={spec}
+              isPreviewing={Boolean(previewState)}
+              previewLabel={previewState?.label}
+              onStartPreview={(previewSpec, label, highlightSectionId) => {
+                setPreviewState({ spec: previewSpec, label, highlightSectionId });
+                if (highlightSectionId) focusCanvasTarget(highlightSectionId);
+              }}
+              onStopPreview={() => setPreviewState(null)}
+              onApplySpec={(nextSpec, msg) => {
+                commitSpec(nextSpec);
+                setAiSuggestions(runLocalAudit(nextSpec));
+                showToast(msg);
+              }}
+              onClose={() => {
+                setPreviewState(null);
+                setAiPanelOpen(false);
+              }}
+              suggestions={aiSuggestions}
+              onSetSuggestions={setAiSuggestions}
+            />
+          ) : (
+            <SectionInspector
+              section={selectedSection}
+              activeFieldKey={currentActiveFieldKey}
+              onFocusField={handleFocusFromInspector}
+              onJumpToCanvas={handleJumpToFocus}
+              onUpdateSection={handleUpdateSection}
+              onDeleteSection={handleDeleteSection}
+            />
+          ))}
       </div>
 
       <SpecModal
@@ -727,55 +894,43 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
           if (found) switchActiveProject(found);
         }}
         onCreateProject={(params) => {
-          const created = createClientProject(projectsState.projects, params);
-          setProjectsState((prev) => {
-            const next = [created, ...prev.projects];
-            saveProjectsState(next, created.id);
-            flushProjectsToServer(next, created.id);
-            return { projects: next, activeProjectId: created.id };
-          });
+          const created = createClientProject(projectsRef.current.projects, params);
+          const next = [created, ...projectsRef.current.projects];
+          applyProjectsState(next, created.id);
+          flushProjectsToServer(next, created.id);
           setHistory({ past: [], present: created.spec, future: [] });
+          setActiveFocus(null);
           setAiSuggestions(runLocalAudit(created.spec));
           setLastPublishedUrl(undefined);
           setProjectsOpen(false);
           showToast(`Đã tạo dự án mới cho "${created.clientName}".`);
         }}
         onDuplicateProject={(source) => {
-          const copy = duplicateClientProject(projectsState.projects, source);
-          setProjectsState((prev) => {
-            const next = [copy, ...prev.projects];
-            saveProjectsState(next, prev.activeProjectId);
-            flushProjectsToServer(next, prev.activeProjectId);
-            return { ...prev, projects: next };
-          });
+          const copy = duplicateClientProject(projectsRef.current.projects, source);
+          const next = [copy, ...projectsRef.current.projects];
+          applyProjectsState(next, projectsRef.current.activeProjectId);
+          flushProjectsToServer(next, projectsRef.current.activeProjectId);
           showToast(`Đã tạo phiên bản sao: ${copy.projectName}`);
         }}
         onDeleteProject={(id) => {
-          if (projectsState.projects.length <= 1) return;
-          const remaining = projectsState.projects.filter((p) => p.id !== id);
-          const nextActive =
-            id === activeProject.id ? remaining[0] : activeProject;
-          setProjectsState({
-            projects: remaining,
-            activeProjectId: nextActive.id,
-          });
-          saveProjectsState(remaining, nextActive.id);
+          if (projectsRef.current.projects.length <= 1) return;
+          const remaining = projectsRef.current.projects.filter((p) => p.id !== id);
+          const nextActive = id === activeProject.id ? remaining[0] : activeProject;
+          applyProjectsState(remaining, nextActive.id);
           flushProjectsToServer(remaining, nextActive.id);
           if (id === activeProject.id) {
+            setActiveFocus(null);
             setHistory({ past: [], present: nextActive.spec, future: [] });
             setAiSuggestions(runLocalAudit(nextActive.spec));
           }
           showToast('Đã xóa dự án.');
         }}
         onUpdateStatus={(id, status: ProjectStatus) => {
-          setProjectsState((prev) => {
-            const next = prev.projects.map((p) =>
-              p.id === id ? { ...p, status, updatedAt: new Date().toISOString() } : p
-            );
-            saveProjectsState(next, prev.activeProjectId);
-            flushProjectsToServer(next, prev.activeProjectId);
-            return { ...prev, projects: next };
-          });
+          const next = projectsRef.current.projects.map((p) =>
+            p.id === id ? { ...p, status, updatedAt: new Date().toISOString() } : p
+          );
+          applyProjectsState(next, projectsRef.current.activeProjectId);
+          flushProjectsToServer(next, projectsRef.current.activeProjectId);
         }}
       />
 

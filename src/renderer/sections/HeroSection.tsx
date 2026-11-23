@@ -1,6 +1,7 @@
 import type { HeroSection as HeroSectionData } from '../../types/spec';
 import { sanitizeHref, sanitizeImageSrc } from '../../utils/storage';
 import { IconRenderer } from '../IconRenderer';
+import { useStudioFieldProps } from '../StudioFocusContext';
 
 interface Props {
   section: HeroSectionData;
@@ -12,29 +13,66 @@ export function HeroSection({ section, isStudio }: Props) {
   const surfaceClass = `lp-surface-${section.style.surface}`;
   const padClass = `lp-pad-${section.style.padding}`;
 
+  const badgeField = useStudioFieldProps(section.id, 'badge', 'Nhãn Badge', 'lp-badge');
+  const headlineField = useStudioFieldProps(section.id, 'headline', 'Tiêu đề chính');
+  const highlightField = useStudioFieldProps(
+    section.id,
+    'highlightText',
+    'Chữ nhấn Gradient',
+    'lp-gradient-text'
+  );
+  const subField = useStudioFieldProps(section.id, 'subheadline', 'Mô tả ngắn Hero', 'lp-hero-sub');
+  const primaryField = useStudioFieldProps(
+    section.id,
+    'primaryCtaLabel',
+    'Nút chính CTA',
+    'lp-btn lp-btn-primary lp-btn-lg'
+  );
+  const secondaryField = useStudioFieldProps(
+    section.id,
+    'secondaryCtaLabel',
+    'Nút phụ CTA',
+    'lp-btn lp-btn-secondary lp-btn-lg'
+  );
+  const chipsField = useStudioFieldProps(
+    section.id,
+    'trustChips',
+    'Cam kết ngắn',
+    'lp-trust-chips'
+  );
+  const imageField = useStudioFieldProps(
+    section.id,
+    'imageUrl',
+    'Ảnh Hero minh họa',
+    'lp-hero-media-frame'
+  );
+
   const renderContent = (centered: boolean) => (
     <div className={centered ? 'lp-hero-centered' : ''}>
       {section.badge && (
-        <div className="lp-badge">
+        <div {...badgeField}>
           <IconRenderer name="sparkles" size={14} />
           <span>{section.badge}</span>
         </div>
       )}
 
       <h1 className="lp-hero-title">
-        {section.headline}{' '}
-        {section.highlightText && <span className="lp-gradient-text">{section.highlightText}</span>}
+        <span {...headlineField}>{section.headline}</span>{' '}
+        {section.highlightText && <span {...highlightField}>{section.highlightText}</span>}
       </h1>
 
-      {section.subheadline && <p className="lp-hero-sub">{section.subheadline}</p>}
+      {section.subheadline && <p {...subField}>{section.subheadline}</p>}
 
       {(section.primaryCtaLabel || section.secondaryCtaLabel) && (
         <div className="lp-hero-actions">
           {section.primaryCtaLabel && (
             <a
               href={sanitizeHref(section.primaryCtaHref)}
-              className="lp-btn lp-btn-primary lp-btn-lg"
-              onClick={(e) => isStudio && e.preventDefault()}
+              {...primaryField}
+              onClick={(e) => {
+                if (isStudio) e.preventDefault();
+                primaryField.onClick?.(e);
+              }}
             >
               <span>{section.primaryCtaLabel}</span>
               <IconRenderer name="arrow-right" size={18} />
@@ -43,8 +81,11 @@ export function HeroSection({ section, isStudio }: Props) {
           {section.secondaryCtaLabel && (
             <a
               href={sanitizeHref(section.secondaryCtaHref)}
-              className="lp-btn lp-btn-secondary lp-btn-lg"
-              onClick={(e) => isStudio && e.preventDefault()}
+              {...secondaryField}
+              onClick={(e) => {
+                if (isStudio) e.preventDefault();
+                secondaryField.onClick?.(e);
+              }}
             >
               {section.secondaryCtaLabel}
             </a>
@@ -53,7 +94,7 @@ export function HeroSection({ section, isStudio }: Props) {
       )}
 
       {section.trustChips.length > 0 && (
-        <div className="lp-trust-chips">
+        <div {...chipsField}>
           {section.trustChips.map((chip, idx) => (
             <span key={idx} className="lp-trust-chip">
               <IconRenderer name="check" size={15} />
@@ -68,7 +109,7 @@ export function HeroSection({ section, isStudio }: Props) {
   const renderMedia = () =>
     safeImg ? (
       <div className="lp-hero-media">
-        <div className="lp-hero-media-frame">
+        <div {...imageField}>
           <img src={safeImg} alt={section.headline} />
           {section.imageCaption && <div className="lp-hero-caption">{section.imageCaption}</div>}
         </div>

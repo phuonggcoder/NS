@@ -1,4 +1,4 @@
-import { Eye, EyeOff, Plus, Trash2 } from 'lucide-react';
+import { Crosshair, Eye, EyeOff, Plus, Trash2 } from 'lucide-react';
 import { PLACEHOLDER_ART } from '../../data/placeholders';
 import { getSectionLabel } from '../../data/templates';
 import { AVAILABLE_ICON_OPTIONS } from '../../renderer/IconRenderer';
@@ -20,12 +20,18 @@ import {
 
 interface SectionInspectorProps {
   section: LandingSection | null;
+  activeFieldKey?: string | null;
+  onFocusField?: (fieldKey: string, label: string) => void;
+  onJumpToCanvas?: () => void;
   onUpdateSection: (updated: LandingSection) => void;
   onDeleteSection: (id: string) => void;
 }
 
 export function SectionInspector({
   section,
+  activeFieldKey,
+  onFocusField,
+  onJumpToCanvas,
   onUpdateSection,
   onDeleteSection,
 }: SectionInspectorProps) {
@@ -63,27 +69,35 @@ export function SectionInspector({
               />
               <TextField
                 label="Tên thương hiệu / Cá nhân"
+                fieldKey="logoText"
+                onFocusField={onFocusField}
                 value={section.logoText}
                 onChange={(logoText) => onUpdateSection({ ...section, logoText })}
               />
               <TextField
                 label="Icon Logo (Emoji)"
+                fieldKey="logoText"
+                onFocusField={onFocusField}
                 value={section.logoEmoji}
                 onChange={(logoEmoji) => onUpdateSection({ ...section, logoEmoji })}
               />
               <TextField
                 label="Chữ nút hành động (CTA)"
+                fieldKey="ctaLabel"
+                onFocusField={onFocusField}
                 value={section.ctaLabel}
                 onChange={(ctaLabel) => onUpdateSection({ ...section, ctaLabel })}
               />
               <TextField
                 label="Liên kết nút CTA"
+                fieldKey="ctaLabel"
+                onFocusField={onFocusField}
                 value={section.ctaHref}
                 onChange={(ctaHref) => onUpdateSection({ ...section, ctaHref })}
               />
             </div>
 
-            <div className="st-group">
+            <div className="st-group" data-inspector-field="links">
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                 <span className="st-group-title" style={{ margin: 0 }}>
                   Menu Liên kết ({section.links.length})
@@ -105,7 +119,15 @@ export function SectionInspector({
                 </button>
               </div>
               {section.links.map((link, idx) => (
-                <div key={link.id} className="st-subcard">
+                <div
+                  key={link.id}
+                  className={`st-subcard ${activeFieldKey === 'links' ? 'is-inspector-active' : ''}`}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                      onFocusField?.('links', `Link #${idx + 1}: ${link.label}`);
+                    }
+                  }}
+                >
                   <div className="st-subcard-head">
                     <span>Link #{idx + 1}</span>
                     <button
@@ -123,6 +145,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Nhãn"
+                    fieldKey="links"
+                    onFocusField={onFocusField}
                     value={link.label}
                     onChange={(label) => {
                       const next = [...section.links];
@@ -132,6 +156,8 @@ export function SectionInspector({
                   />
                   <TextField
                     label="Đường dẫn (#id hoặc https://)"
+                    fieldKey="links"
+                    onFocusField={onFocusField}
                     value={link.href}
                     onChange={(href) => {
                       const next = [...section.links];
@@ -162,22 +188,30 @@ export function SectionInspector({
               />
               <TextField
                 label="Nhãn nhỏ (Badge)"
+                fieldKey="badge"
+                onFocusField={onFocusField}
                 value={section.badge}
                 onChange={(badge) => onUpdateSection({ ...section, badge })}
               />
               <TextAreaField
                 label="Tiêu đề chính"
+                fieldKey="headline"
+                onFocusField={onFocusField}
                 rows={2}
                 value={section.headline}
                 onChange={(headline) => onUpdateSection({ ...section, headline })}
               />
               <TextField
                 label="Cụm chữ nhấn màu Gradient"
+                fieldKey="highlightText"
+                onFocusField={onFocusField}
                 value={section.highlightText}
                 onChange={(highlightText) => onUpdateSection({ ...section, highlightText })}
               />
               <TextAreaField
                 label="Mô tả ngắn dưới tiêu đề"
+                fieldKey="subheadline"
+                onFocusField={onFocusField}
                 rows={3}
                 value={section.subheadline}
                 onChange={(subheadline) => onUpdateSection({ ...section, subheadline })}
@@ -188,16 +222,22 @@ export function SectionInspector({
               <div className="st-group-title">Nút bấm & Hình ảnh</div>
               <TextField
                 label="Nút chính"
+                fieldKey="primaryCtaLabel"
+                onFocusField={onFocusField}
                 value={section.primaryCtaLabel}
                 onChange={(primaryCtaLabel) => onUpdateSection({ ...section, primaryCtaLabel })}
               />
               <TextField
                 label="Link nút chính"
+                fieldKey="primaryCtaLabel"
+                onFocusField={onFocusField}
                 value={section.primaryCtaHref}
                 onChange={(primaryCtaHref) => onUpdateSection({ ...section, primaryCtaHref })}
               />
               <TextField
                 label="Nút phụ"
+                fieldKey="secondaryCtaLabel"
+                onFocusField={onFocusField}
                 value={section.secondaryCtaLabel}
                 onChange={(secondaryCtaLabel) =>
                   onUpdateSection({ ...section, secondaryCtaLabel })
@@ -205,21 +245,29 @@ export function SectionInspector({
               />
               <TextField
                 label="Link nút phụ"
+                fieldKey="secondaryCtaLabel"
+                onFocusField={onFocusField}
                 value={section.secondaryCtaHref}
                 onChange={(secondaryCtaHref) => onUpdateSection({ ...section, secondaryCtaHref })}
               />
               <ImageField
                 label="Ảnh / Banner minh họa"
+                fieldKey="imageUrl"
+                onFocusField={onFocusField}
                 value={section.imageUrl}
                 onChange={(imageUrl) => onUpdateSection({ ...section, imageUrl })}
               />
               <TextField
                 label="Chú thích dưới ảnh"
+                fieldKey="imageUrl"
+                onFocusField={onFocusField}
                 value={section.imageCaption}
                 onChange={(imageCaption) => onUpdateSection({ ...section, imageCaption })}
               />
               <StringListEditor
                 label="Cam kết ngắn (Trust chips)"
+                fieldKey="trustChips"
+                onFocusField={onFocusField}
                 items={section.trustChips}
                 onChange={(trustChips) => onUpdateSection({ ...section, trustChips })}
               />
@@ -259,7 +307,16 @@ export function SectionInspector({
               </button>
             </div>
             {section.items.map((item, idx) => (
-              <div key={item.id} className="st-subcard">
+              <div
+                key={item.id}
+                data-inspector-field={`item-${idx}`}
+                className={`st-subcard ${activeFieldKey === `item-${idx}` ? 'is-inspector-active' : ''}`}
+                onClick={(e) => {
+                  if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                    onFocusField?.(`item-${idx}`, `Chỉ số #${idx + 1}`);
+                  }
+                }}
+              >
                 <div className="st-subcard-head">
                   <span>Chỉ số #{idx + 1}</span>
                   <button
@@ -277,6 +334,8 @@ export function SectionInspector({
                 </div>
                 <TextField
                   label="Con số"
+                  fieldKey={`item-${idx}`}
+                  onFocusField={onFocusField}
                   value={item.value}
                   onChange={(value) => {
                     const next = [...section.items];
@@ -286,6 +345,8 @@ export function SectionInspector({
                 />
                 <TextField
                   label="Nhãn"
+                  fieldKey={`item-${idx}`}
+                  onFocusField={onFocusField}
                   value={item.label}
                   onChange={(label) => {
                     const next = [...section.items];
@@ -295,6 +356,8 @@ export function SectionInspector({
                 />
                 <TextField
                   label="Ghi chú nhỏ"
+                  fieldKey={`item-${idx}`}
+                  onFocusField={onFocusField}
                   value={item.note || ''}
                   onChange={(note) => {
                     const next = [...section.items];
@@ -324,38 +387,50 @@ export function SectionInspector({
               />
               <TextField
                 label="Badge"
+                fieldKey="badge"
+                onFocusField={onFocusField}
                 value={section.badge}
                 onChange={(badge) => onUpdateSection({ ...section, badge })}
               />
               <TextField
                 label="Tiêu đề / Tên của bạn"
+                fieldKey="title"
+                onFocusField={onFocusField}
                 value={section.title}
                 onChange={(title) => onUpdateSection({ ...section, title })}
               />
               <TextField
                 label="Chức danh / Vai trò"
+                fieldKey="role"
+                onFocusField={onFocusField}
                 value={section.role}
                 onChange={(role) => onUpdateSection({ ...section, role })}
               />
               <TextAreaField
                 label="Câu chuyện / Tiểu sử"
+                fieldKey="bio"
+                onFocusField={onFocusField}
                 rows={4}
                 value={section.bio}
                 onChange={(bio) => onUpdateSection({ ...section, bio })}
               />
               <ImageField
                 label="Ảnh chân dung"
+                fieldKey="avatarUrl"
+                onFocusField={onFocusField}
                 value={section.avatarUrl}
                 onChange={(avatarUrl) => onUpdateSection({ ...section, avatarUrl })}
               />
               <StringListEditor
                 label="Kỹ năng / Thế mạnh"
+                fieldKey="highlights"
+                onFocusField={onFocusField}
                 items={section.highlights}
                 onChange={(highlights) => onUpdateSection({ ...section, highlights })}
               />
             </div>
 
-            <div className="st-group">
+            <div className="st-group" data-inspector-field="milestones">
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                 <span className="st-group-title" style={{ margin: 0 }}>
                   Cột mốc kinh nghiệm
@@ -382,7 +457,15 @@ export function SectionInspector({
                 </button>
               </div>
               {section.milestones.map((m, idx) => (
-                <div key={m.id} className="st-subcard">
+                <div
+                  key={m.id}
+                  className={`st-subcard ${activeFieldKey === 'milestones' ? 'is-inspector-active' : ''}`}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                      onFocusField?.('milestones', 'Cột mốc kinh nghiệm');
+                    }
+                  }}
+                >
                   <div className="st-subcard-head">
                     <span>Cột mốc #{idx + 1}</span>
                     <button
@@ -400,6 +483,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Thời gian"
+                    fieldKey="milestones"
+                    onFocusField={onFocusField}
                     value={m.year}
                     onChange={(year) => {
                       const next = [...section.milestones];
@@ -409,6 +494,8 @@ export function SectionInspector({
                   />
                   <TextField
                     label="Tiêu đề"
+                    fieldKey="milestones"
+                    onFocusField={onFocusField}
                     value={m.title}
                     onChange={(title) => {
                       const next = [...section.milestones];
@@ -418,6 +505,8 @@ export function SectionInspector({
                   />
                   <TextAreaField
                     label="Mô tả"
+                    fieldKey="milestones"
+                    onFocusField={onFocusField}
                     rows={2}
                     value={m.detail}
                     onChange={(detail) => {
@@ -430,7 +519,7 @@ export function SectionInspector({
               ))}
             </div>
 
-            <div className="st-group">
+            <div className="st-group" data-inspector-field="socials">
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                 <span className="st-group-title" style={{ margin: 0 }}>
                   Mạng xã hội
@@ -452,7 +541,15 @@ export function SectionInspector({
                 </button>
               </div>
               {section.socials.map((soc, idx) => (
-                <div key={soc.id} className="st-subcard">
+                <div
+                  key={soc.id}
+                  className={`st-subcard ${activeFieldKey === 'socials' ? 'is-inspector-active' : ''}`}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                      onFocusField?.('socials', 'Mạng xã hội');
+                    }
+                  }}
+                >
                   <div className="st-subcard-head">
                     <span>{soc.label}</span>
                     <button
@@ -470,6 +567,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Tên kênh"
+                    fieldKey="socials"
+                    onFocusField={onFocusField}
                     value={soc.label}
                     onChange={(label) => {
                       const next = [...section.socials];
@@ -479,6 +578,8 @@ export function SectionInspector({
                   />
                   <TextField
                     label="Liên kết"
+                    fieldKey="socials"
+                    onFocusField={onFocusField}
                     value={soc.href}
                     onChange={(href) => {
                       const next = [...section.socials];
@@ -519,16 +620,22 @@ export function SectionInspector({
               />
               <TextField
                 label="Badge"
+                fieldKey="badge"
+                onFocusField={onFocusField}
                 value={section.badge}
                 onChange={(badge) => onUpdateSection({ ...section, badge })}
               />
               <TextField
                 label="Tiêu đề khối sản phẩm"
+                fieldKey="title"
+                onFocusField={onFocusField}
                 value={section.title}
                 onChange={(title) => onUpdateSection({ ...section, title })}
               />
               <TextAreaField
                 label="Mô tả ngắn"
+                fieldKey="subtitle"
+                onFocusField={onFocusField}
                 rows={2}
                 value={section.subtitle}
                 onChange={(subtitle) => onUpdateSection({ ...section, subtitle })}
@@ -582,7 +689,16 @@ export function SectionInspector({
               </div>
 
               {section.items.map((prd, idx) => (
-                <div key={prd.id} className="st-subcard">
+                <div
+                  key={prd.id}
+                  data-inspector-field={`item-${idx}`}
+                  className={`st-subcard ${activeFieldKey === `item-${idx}` ? 'is-inspector-active' : ''}`}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                      onFocusField?.(`item-${idx}`, `SP #${idx + 1}: ${prd.name}`);
+                    }
+                  }}
+                >
                   <div className="st-subcard-head">
                     <span>
                       SP #{idx + 1}: {prd.name}
@@ -603,6 +719,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Tên sản phẩm"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={prd.name}
                     onChange={(name) => {
                       const next = [...section.items];
@@ -613,6 +731,8 @@ export function SectionInspector({
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <TextField
                       label="Giá bán"
+                      fieldKey={`item-${idx}`}
+                      onFocusField={onFocusField}
                       value={prd.price}
                       onChange={(price) => {
                         const next = [...section.items];
@@ -622,6 +742,8 @@ export function SectionInspector({
                     />
                     <TextField
                       label="Giá gốc (gạch ngang)"
+                      fieldKey={`item-${idx}`}
+                      onFocusField={onFocusField}
                       value={prd.originalPrice || ''}
                       onChange={(originalPrice) => {
                         const next = [...section.items];
@@ -632,6 +754,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Nhãn nổi bật (VD: Bán chạy)"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={prd.badge || ''}
                     onChange={(badge) => {
                       const next = [...section.items];
@@ -641,6 +765,8 @@ export function SectionInspector({
                   />
                   <TextAreaField
                     label="Mô tả"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     rows={2}
                     value={prd.description}
                     onChange={(description) => {
@@ -651,6 +777,8 @@ export function SectionInspector({
                   />
                   <ImageField
                     label="Ảnh sản phẩm"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={prd.imageUrl}
                     onChange={(imageUrl) => {
                       const next = [...section.items];
@@ -660,6 +788,8 @@ export function SectionInspector({
                   />
                   <StringListEditor
                     label="Quyền lợi / Điểm mạnh"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     items={prd.features}
                     onChange={(features) => {
                       const next = [...section.items];
@@ -669,6 +799,8 @@ export function SectionInspector({
                   />
                   <TextField
                     label="Chữ trên nút Mua"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={prd.ctaLabel}
                     onChange={(ctaLabel) => {
                       const next = [...section.items];
@@ -710,16 +842,22 @@ export function SectionInspector({
               />
               <TextField
                 label="Badge"
+                fieldKey="badge"
+                onFocusField={onFocusField}
                 value={section.badge}
                 onChange={(badge) => onUpdateSection({ ...section, badge })}
               />
               <TextField
                 label="Tiêu đề"
+                fieldKey="title"
+                onFocusField={onFocusField}
                 value={section.title}
                 onChange={(title) => onUpdateSection({ ...section, title })}
               />
               <TextAreaField
                 label="Mô tả ngắn"
+                fieldKey="subtitle"
+                onFocusField={onFocusField}
                 rows={2}
                 value={section.subtitle}
                 onChange={(subtitle) => onUpdateSection({ ...section, subtitle })}
@@ -754,7 +892,16 @@ export function SectionInspector({
                 </button>
               </div>
               {section.items.map((item, idx) => (
-                <div key={item.id} className="st-subcard">
+                <div
+                  key={item.id}
+                  data-inspector-field={`item-${idx}`}
+                  className={`st-subcard ${activeFieldKey === `item-${idx}` ? 'is-inspector-active' : ''}`}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                      onFocusField?.(`item-${idx}`, `Ảnh #${idx + 1}: ${item.title}`);
+                    }
+                  }}
+                >
                   <div className="st-subcard-head">
                     <span>Ảnh #{idx + 1}: {item.title}</span>
                     <button
@@ -772,6 +919,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Tiêu đề"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={item.title}
                     onChange={(title) => {
                       const next = [...section.items];
@@ -781,6 +930,8 @@ export function SectionInspector({
                   />
                   <TextField
                     label="Phân loại"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={item.category}
                     onChange={(category) => {
                       const next = [...section.items];
@@ -790,6 +941,8 @@ export function SectionInspector({
                   />
                   <ImageField
                     label="Hình ảnh"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={item.imageUrl}
                     onChange={(imageUrl) => {
                       const next = [...section.items];
@@ -799,6 +952,8 @@ export function SectionInspector({
                   />
                   <TextAreaField
                     label="Chú thích"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     rows={2}
                     value={item.caption}
                     onChange={(caption) => {
@@ -830,16 +985,22 @@ export function SectionInspector({
               />
               <TextField
                 label="Badge"
+                fieldKey="badge"
+                onFocusField={onFocusField}
                 value={section.badge}
                 onChange={(badge) => onUpdateSection({ ...section, badge })}
               />
               <TextField
                 label="Tiêu đề"
+                fieldKey="title"
+                onFocusField={onFocusField}
                 value={section.title}
                 onChange={(title) => onUpdateSection({ ...section, title })}
               />
               <TextAreaField
                 label="Mô tả"
+                fieldKey="subtitle"
+                onFocusField={onFocusField}
                 rows={2}
                 value={section.subtitle}
                 onChange={(subtitle) => onUpdateSection({ ...section, subtitle })}
@@ -873,7 +1034,16 @@ export function SectionInspector({
                 </button>
               </div>
               {section.items.map((item, idx) => (
-                <div key={item.id} className="st-subcard">
+                <div
+                  key={item.id}
+                  data-inspector-field={`item-${idx}`}
+                  className={`st-subcard ${activeFieldKey === `item-${idx}` ? 'is-inspector-active' : ''}`}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                      onFocusField?.(`item-${idx}`, `Mục #${idx + 1}: ${item.title}`);
+                    }
+                  }}
+                >
                   <div className="st-subcard-head">
                     <span>Mục #{idx + 1}</span>
                     <button
@@ -894,6 +1064,7 @@ export function SectionInspector({
                     <select
                       className="st-select"
                       value={item.icon}
+                      onFocus={() => onFocusField?.(`item-${idx}`, `Mục #${idx + 1}: Icon`)}
                       onChange={(e) => {
                         const next = [...section.items];
                         next[idx] = { ...item, icon: e.target.value };
@@ -909,6 +1080,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Tiêu đề"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={item.title}
                     onChange={(title) => {
                       const next = [...section.items];
@@ -918,6 +1091,8 @@ export function SectionInspector({
                   />
                   <TextAreaField
                     label="Nội dung"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     rows={2}
                     value={item.description}
                     onChange={(description) => {
@@ -948,16 +1123,22 @@ export function SectionInspector({
               />
               <TextField
                 label="Badge"
+                fieldKey="badge"
+                onFocusField={onFocusField}
                 value={section.badge}
                 onChange={(badge) => onUpdateSection({ ...section, badge })}
               />
               <TextField
                 label="Tiêu đề"
+                fieldKey="title"
+                onFocusField={onFocusField}
                 value={section.title}
                 onChange={(title) => onUpdateSection({ ...section, title })}
               />
               <TextAreaField
                 label="Mô tả"
+                fieldKey="subtitle"
+                onFocusField={onFocusField}
                 rows={2}
                 value={section.subtitle}
                 onChange={(subtitle) => onUpdateSection({ ...section, subtitle })}
@@ -995,7 +1176,16 @@ export function SectionInspector({
                 </button>
               </div>
               {section.tiers.map((tier, idx) => (
-                <div key={tier.id} className="st-subcard">
+                <div
+                  key={tier.id}
+                  data-inspector-field={`tier-${idx}`}
+                  className={`st-subcard ${activeFieldKey === `tier-${idx}` ? 'is-inspector-active' : ''}`}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('input, textarea, select, button, label')) {
+                      onFocusField?.(`tier-${idx}`, `Gói #${idx + 1}: ${tier.name}`);
+                    }
+                  }}
+                >
                   <div className="st-subcard-head">
                     <span>{tier.name}</span>
                     <button
@@ -1013,6 +1203,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Tên gói"
+                    fieldKey={`tier-${idx}`}
+                    onFocusField={onFocusField}
                     value={tier.name}
                     onChange={(name) => {
                       const next = [...section.tiers];
@@ -1023,6 +1215,8 @@ export function SectionInspector({
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                     <TextField
                       label="Giá"
+                      fieldKey={`tier-${idx}`}
+                      onFocusField={onFocusField}
                       value={tier.price}
                       onChange={(price) => {
                         const next = [...section.tiers];
@@ -1032,6 +1226,8 @@ export function SectionInspector({
                     />
                     <TextField
                       label="Chu kỳ"
+                      fieldKey={`tier-${idx}`}
+                      onFocusField={onFocusField}
                       value={tier.period}
                       onChange={(period) => {
                         const next = [...section.tiers];
@@ -1042,6 +1238,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Nhãn nổi bật"
+                    fieldKey={`tier-${idx}`}
+                    onFocusField={onFocusField}
                     value={tier.badge || ''}
                     onChange={(badge) => {
                       const next = [...section.tiers];
@@ -1072,6 +1270,8 @@ export function SectionInspector({
                   </label>
                   <TextAreaField
                     label="Mô tả"
+                    fieldKey={`tier-${idx}`}
+                    onFocusField={onFocusField}
                     rows={2}
                     value={tier.description}
                     onChange={(description) => {
@@ -1082,6 +1282,8 @@ export function SectionInspector({
                   />
                   <StringListEditor
                     label="Quyền lợi trong gói"
+                    fieldKey={`tier-${idx}`}
+                    onFocusField={onFocusField}
                     items={tier.features}
                     onChange={(features) => {
                       const next = [...section.tiers];
@@ -1091,6 +1293,8 @@ export function SectionInspector({
                   />
                   <TextField
                     label="Chữ trên nút"
+                    fieldKey={`tier-${idx}`}
+                    onFocusField={onFocusField}
                     value={tier.ctaLabel}
                     onChange={(ctaLabel) => {
                       const next = [...section.tiers];
@@ -1120,16 +1324,22 @@ export function SectionInspector({
               />
               <TextField
                 label="Badge"
+                fieldKey="badge"
+                onFocusField={onFocusField}
                 value={section.badge}
                 onChange={(badge) => onUpdateSection({ ...section, badge })}
               />
               <TextField
                 label="Tiêu đề"
+                fieldKey="title"
+                onFocusField={onFocusField}
                 value={section.title}
                 onChange={(title) => onUpdateSection({ ...section, title })}
               />
               <TextAreaField
                 label="Mô tả"
+                fieldKey="subtitle"
+                onFocusField={onFocusField}
                 rows={2}
                 value={section.subtitle}
                 onChange={(subtitle) => onUpdateSection({ ...section, subtitle })}
@@ -1164,7 +1374,16 @@ export function SectionInspector({
                 </button>
               </div>
               {section.items.map((item, idx) => (
-                <div key={item.id} className="st-subcard">
+                <div
+                  key={item.id}
+                  data-inspector-field={`item-${idx}`}
+                  className={`st-subcard ${activeFieldKey === `item-${idx}` ? 'is-inspector-active' : ''}`}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                      onFocusField?.(`item-${idx}`, item.name || `Nhận xét #${idx + 1}`);
+                    }
+                  }}
+                >
                   <div className="st-subcard-head">
                     <span>{item.name}</span>
                     <button
@@ -1182,6 +1401,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Tên khách hàng"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={item.name}
                     onChange={(name) => {
                       const next = [...section.items];
@@ -1191,6 +1412,8 @@ export function SectionInspector({
                   />
                   <TextField
                     label="Chức vụ / Công ty"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={item.role}
                     onChange={(role) => {
                       const next = [...section.items];
@@ -1200,6 +1423,8 @@ export function SectionInspector({
                   />
                   <TextAreaField
                     label="Lời nhận xét"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     rows={2}
                     value={item.quote}
                     onChange={(quote) => {
@@ -1230,16 +1455,22 @@ export function SectionInspector({
               />
               <TextField
                 label="Badge"
+                fieldKey="badge"
+                onFocusField={onFocusField}
                 value={section.badge}
                 onChange={(badge) => onUpdateSection({ ...section, badge })}
               />
               <TextField
                 label="Tiêu đề"
+                fieldKey="title"
+                onFocusField={onFocusField}
                 value={section.title}
                 onChange={(title) => onUpdateSection({ ...section, title })}
               />
               <TextAreaField
                 label="Mô tả"
+                fieldKey="subtitle"
+                onFocusField={onFocusField}
                 rows={2}
                 value={section.subtitle}
                 onChange={(subtitle) => onUpdateSection({ ...section, subtitle })}
@@ -1272,7 +1503,16 @@ export function SectionInspector({
                 </button>
               </div>
               {section.items.map((item, idx) => (
-                <div key={item.id} className="st-subcard">
+                <div
+                  key={item.id}
+                  data-inspector-field={`item-${idx}`}
+                  className={`st-subcard ${activeFieldKey === `item-${idx}` ? 'is-inspector-active' : ''}`}
+                  onClick={(e) => {
+                    if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                      onFocusField?.(`item-${idx}`, `Câu hỏi #${idx + 1}`);
+                    }
+                  }}
+                >
                   <div className="st-subcard-head">
                     <span>Câu hỏi #{idx + 1}</span>
                     <button
@@ -1290,6 +1530,8 @@ export function SectionInspector({
                   </div>
                   <TextField
                     label="Câu hỏi"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     value={item.question}
                     onChange={(question) => {
                       const next = [...section.items];
@@ -1299,6 +1541,8 @@ export function SectionInspector({
                   />
                   <TextAreaField
                     label="Trả lời"
+                    fieldKey={`item-${idx}`}
+                    onFocusField={onFocusField}
                     rows={3}
                     value={item.answer}
                     onChange={(answer) => {
@@ -1328,38 +1572,52 @@ export function SectionInspector({
             />
             <TextField
               label="Badge"
+              fieldKey="badge"
+              onFocusField={onFocusField}
               value={section.badge}
               onChange={(badge) => onUpdateSection({ ...section, badge })}
             />
             <TextAreaField
               label="Tiêu đề"
+              fieldKey="title"
+              onFocusField={onFocusField}
               rows={2}
               value={section.title}
               onChange={(title) => onUpdateSection({ ...section, title })}
             />
             <TextAreaField
               label="Mô tả"
+              fieldKey="subtitle"
+              onFocusField={onFocusField}
               rows={2}
               value={section.subtitle}
               onChange={(subtitle) => onUpdateSection({ ...section, subtitle })}
             />
             <TextField
               label="Nút chính"
+              fieldKey="primaryLabel"
+              onFocusField={onFocusField}
               value={section.primaryLabel}
               onChange={(primaryLabel) => onUpdateSection({ ...section, primaryLabel })}
             />
             <TextField
               label="Link nút chính"
+              fieldKey="primaryLabel"
+              onFocusField={onFocusField}
               value={section.primaryHref}
               onChange={(primaryHref) => onUpdateSection({ ...section, primaryHref })}
             />
             <TextField
               label="Nút phụ"
+              fieldKey="secondaryLabel"
+              onFocusField={onFocusField}
               value={section.secondaryLabel}
               onChange={(secondaryLabel) => onUpdateSection({ ...section, secondaryLabel })}
             />
             <TextField
               label="Link nút phụ"
+              fieldKey="secondaryLabel"
+              onFocusField={onFocusField}
               value={section.secondaryHref}
               onChange={(secondaryHref) => onUpdateSection({ ...section, secondaryHref })}
             />
@@ -1381,52 +1639,74 @@ export function SectionInspector({
             />
             <TextField
               label="Badge"
+              fieldKey="badge"
+              onFocusField={onFocusField}
               value={section.badge}
               onChange={(badge) => onUpdateSection({ ...section, badge })}
             />
             <TextField
               label="Tiêu đề"
+              fieldKey="title"
+              onFocusField={onFocusField}
               value={section.title}
               onChange={(title) => onUpdateSection({ ...section, title })}
             />
             <TextAreaField
               label="Mô tả"
+              fieldKey="subtitle"
+              onFocusField={onFocusField}
               rows={2}
               value={section.subtitle}
               onChange={(subtitle) => onUpdateSection({ ...section, subtitle })}
             />
-            <TextField
-              label="Số điện thoại"
-              value={section.phone}
-              onChange={(phone) => onUpdateSection({ ...section, phone })}
-            />
-            <TextField
-              label="Email"
-              value={section.email}
-              onChange={(email) => onUpdateSection({ ...section, email })}
-            />
-            <TextField
-              label="Địa chỉ"
-              value={section.address}
-              onChange={(address) => onUpdateSection({ ...section, address })}
-            />
-            <TextField
-              label="Chữ nút Zalo"
-              value={section.zaloLabel}
-              onChange={(zaloLabel) => onUpdateSection({ ...section, zaloLabel })}
-            />
-            <TextField
-              label="Link Zalo"
-              value={section.zaloHref}
-              onChange={(zaloHref) => onUpdateSection({ ...section, zaloHref })}
-            />
+            <div data-inspector-field="contactInfo">
+              <TextField
+                label="Số điện thoại"
+                fieldKey="contactInfo"
+                onFocusField={onFocusField}
+                value={section.phone}
+                onChange={(phone) => onUpdateSection({ ...section, phone })}
+              />
+              <TextField
+                label="Email"
+                fieldKey="contactInfo"
+                onFocusField={onFocusField}
+                value={section.email}
+                onChange={(email) => onUpdateSection({ ...section, email })}
+              />
+              <TextField
+                label="Địa chỉ"
+                fieldKey="contactInfo"
+                onFocusField={onFocusField}
+                value={section.address}
+                onChange={(address) => onUpdateSection({ ...section, address })}
+              />
+              <TextField
+                label="Chữ nút Zalo"
+                fieldKey="contactInfo"
+                onFocusField={onFocusField}
+                value={section.zaloLabel}
+                onChange={(zaloLabel) => onUpdateSection({ ...section, zaloLabel })}
+              />
+              <TextField
+                label="Link Zalo"
+                fieldKey="contactInfo"
+                onFocusField={onFocusField}
+                value={section.zaloHref}
+                onChange={(zaloHref) => onUpdateSection({ ...section, zaloHref })}
+              />
+            </div>
             <TextField
               label="Chữ nút gửi Form"
+              fieldKey="formSubmitLabel"
+              onFocusField={onFocusField}
               value={section.formSubmitLabel}
               onChange={(formSubmitLabel) => onUpdateSection({ ...section, formSubmitLabel })}
             />
             <TextAreaField
               label="Thông báo khi gửi thành công"
+              fieldKey="formSubmitLabel"
+              onFocusField={onFocusField}
               rows={2}
               value={section.successMessage}
               onChange={(successMessage) => onUpdateSection({ ...section, successMessage })}
@@ -1450,24 +1730,30 @@ export function SectionInspector({
               />
               <TextField
                 label="Tên thương hiệu"
+                fieldKey="brandName"
+                onFocusField={onFocusField}
                 value={section.brandName}
                 onChange={(brandName) => onUpdateSection({ ...section, brandName })}
               />
               <TextAreaField
                 label="Mô tả thương hiệu"
+                fieldKey="brandDescription"
+                onFocusField={onFocusField}
                 rows={2}
                 value={section.brandDescription}
                 onChange={(brandDescription) => onUpdateSection({ ...section, brandDescription })}
               />
               <TextField
                 label="Dòng bản quyền"
+                fieldKey="copyright"
+                onFocusField={onFocusField}
                 value={section.copyright}
                 onChange={(copyright) => onUpdateSection({ ...section, copyright })}
               />
             </div>
 
             {section.variant === 'columns' && (
-              <div className="st-group">
+              <div className="st-group" data-inspector-field="columns">
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
                   <span className="st-group-title" style={{ margin: 0 }}>
                     Các cột liên kết
@@ -1494,7 +1780,15 @@ export function SectionInspector({
                 </div>
 
                 {section.columns.map((col, cIdx) => (
-                  <div key={col.id} className="st-subcard">
+                  <div
+                    key={col.id}
+                    className={`st-subcard ${activeFieldKey === 'columns' ? 'is-inspector-active' : ''}`}
+                    onClick={(e) => {
+                      if (!(e.target as HTMLElement).closest('input, textarea, select, button')) {
+                        onFocusField?.('columns', `Cột liên kết: ${col.title}`);
+                      }
+                    }}
+                  >
                     <div className="st-subcard-head">
                       <span>{col.title}</span>
                       <button
@@ -1512,6 +1806,8 @@ export function SectionInspector({
                     </div>
                     <TextField
                       label="Tiêu đề cột"
+                      fieldKey="columns"
+                      onFocusField={onFocusField}
                       value={col.title}
                       onChange={(title) => {
                         const next = [...section.columns];
@@ -1526,6 +1822,7 @@ export function SectionInspector({
                           className="st-input"
                           value={lnk.label}
                           placeholder="Nhãn"
+                          onFocus={() => onFocusField?.('columns', `Link footer: ${lnk.label}`)}
                           onChange={(e) => {
                             const nextCols = [...section.columns];
                             const nextLinks = [...col.links];
@@ -1539,6 +1836,7 @@ export function SectionInspector({
                           className="st-input"
                           value={lnk.href}
                           placeholder="#anchor"
+                          onFocus={() => onFocusField?.('columns', `Link footer: ${lnk.label}`)}
                           onChange={(e) => {
                             const nextCols = [...section.columns];
                             const nextLinks = [...col.links];
@@ -1593,7 +1891,18 @@ export function SectionInspector({
           <div style={{ fontWeight: 700, fontSize: 13.5 }}>{getSectionLabel(section.type)}</div>
           <div style={{ fontSize: 11, color: '#64748b' }}>ID neo: #{section.anchorId || section.id}</div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          {onJumpToCanvas && (
+            <button
+              type="button"
+              className="st-btn st-btn-sm"
+              title="Định vị trên trang"
+              onClick={onJumpToCanvas}
+            >
+              <Crosshair size={13} />
+              <span>Định vị trên trang</span>
+            </button>
+          )}
           <button
             type="button"
             className="st-btn st-btn-sm"

@@ -23,6 +23,7 @@ import { TestimonialsSection } from './sections/TestimonialsSection';
 
 export interface StudioEditorProps {
   selectedSectionId: string | null;
+  cleanPreview?: boolean;
   previewHighlightSectionId?: string | null;
   onSelectSection: (id: string) => void;
   onMoveSection: (id: string, delta: -1 | 1) => void;
@@ -87,7 +88,10 @@ export function LandingPage({
     `lp-btn-style-${spec.theme.shape.buttonStyle}`,
     `lp-card-style-${spec.theme.shape.cardStyle}`,
     `lp-motion-${spec.theme.motion ?? 'subtle'}`,
-  ].join(' ');
+    editorProps?.cleanPreview ? 'lp-clean-preview' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   const visibleSections = spec.sections.filter((section) => section.visible);
 

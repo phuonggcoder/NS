@@ -26,6 +26,13 @@ export function getDataDir(rootDir = process.cwd()) {
   return path.resolve(rootDir, 'data');
 }
 
+export function getPublicDir(rootDir = process.cwd()) {
+  if (process.env.PUBLIC_DIR && process.env.PUBLIC_DIR.trim()) {
+    return path.resolve(process.env.PUBLIC_DIR.trim());
+  }
+  return path.resolve(rootDir, 'public');
+}
+
 export function getStorageMode() {
   if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
     return 'upstash';
@@ -156,7 +163,7 @@ export async function storeDelete(key, rootDir = process.cwd()) {
 }
 
 export async function savePublishedSite(slug, spec, html, rootDir = process.cwd()) {
-  const publicDir = path.resolve(rootDir, 'public');
+  const publicDir = getPublicDir(rootDir);
   await fs.promises.mkdir(publicDir, { recursive: true });
 
   const mainSiteRecord = {
@@ -227,7 +234,7 @@ export async function getPublishedSite(slug = null, rootDir = process.cwd()) {
   }
 
   // Fallback to disk if pre-seeded in public/
-  const publicDir = path.resolve(rootDir, 'public');
+  const publicDir = getPublicDir(rootDir);
   try {
     if (slug) {
       const safeSlug = sanitizeSlug(slug);
@@ -254,7 +261,7 @@ export async function listPublishedSites(rootDir = process.cwd()) {
   const indexMap = (await storeGet('sites_index', {}, rootDir)) || {};
   const bySlug = new Map(Object.entries(indexMap));
 
-  const clientsRoot = path.resolve(rootDir, 'public', 'clients');
+  const clientsRoot = path.join(getPublicDir(rootDir), 'clients');
   try {
     const entries = await fs.promises.readdir(clientsRoot, { withFileTypes: true });
     for (const entry of entries) {
@@ -289,4 +296,35 @@ export async function listPublishedSites(rootDir = process.cwd()) {
   }
 
   return Array.from(bySlug.values());
+}
+
+export async function getPublicSiteSpec(slug = null, rootDir = process.cwd()) {
+  const safeSlug = slug ? sanitizeSlug(slug) : null;
+  const projectsData = await storeGet('projects', null, rootDir);
+
+  if (projectsData && Array.isArray(projectsData.projects) && projectsData.projects.length > 0) {
+    const match = safeSlug
+      ? projectsData.projects.find((p) => p && p.slug === safeSlug)
+      : projectsData.projects.find((p) => p && p.id === projectsData.activeProjectId) ||
+        projectsData.projects[0];
+
+    if (match && match.spec && Array.isArray(match.spec.sections)) {
+      return {
+        slug: match.slug || safeSlug || 'du-an-mau',
+        projectName: match.projectName || match.spec.meta?.title || 'Landing Page',
+        spec: match.spec,
+      };
+    }
+  }
+
+  const published = await getPublishedSite(safeSlug, rootDir);
+  if (published && published.spec && Array.isArray(published.spec.sections)) {
+    return {
+      slug: safeSlug || published.slug || 'du-an-mau',
+      projectName: published.spec.meta?.title || safeSlug || 'Landing Page',
+      spec: published.spec,
+    };
+  }
+
+  return null;
 }

@@ -5,16 +5,13 @@ import { AuthGate } from './studio/AuthGate';
 import { ClientReviewBar } from './studio/ClientReviewBar';
 import { StudioApp } from './studio/StudioApp';
 import type { LandingPageSpec } from './types/spec';
-import { loadProjectsState } from './utils/projects';
-import { loadStoredSpec, saveLead, saveOrder } from './utils/storage';
+import { readLocalSpecReadOnly } from './utils/projects';
+import { saveLead, saveOrder } from './utils/storage';
 
-function resolveInitialSpec(slugParam: string | null): LandingPageSpec {
-  if (slugParam) {
-    const { projects } = loadProjectsState();
-    const match = projects.find((p) => p.slug === slugParam);
-    if (match) return match.spec;
-  }
-  return loadStoredSpec() ?? getTemplateSpec('creator-store');
+function isValidSpec(candidate: unknown): candidate is LandingPageSpec {
+  if (!candidate || typeof candidate !== 'object') return false;
+  const spec = candidate as LandingPageSpec;
+  return Boolean(Array.isArray(spec.sections) && spec.theme && spec.meta);
 }
 
 export function App() {
@@ -25,44 +22,69 @@ export function App() {
   const fromStudio = params.get('from') === 'studio';
   const slugParam = params.get('slug');
 
-  const [liveSpec, setLiveSpec] = useState<LandingPageSpec>(() =>
-    resolveInitialSpec(slugParam)
+  const [liveSpec, setLiveSpec] = useState<LandingPageSpec>(
+    () => readLocalSpecReadOnly(slugParam) ?? getTemplateSpec('creator-store')
   );
+  const [loadingSpec, setLoadingSpec] = useState<boolean>(isLiveMode || isReviewMode);
   const [reviewViewport, setReviewViewport] = useState<'desktop' | 'mobile'>('desktop');
 
   useEffect(() => {
     if (!isLiveMode && !isReviewMode) return;
+    let cancelled = false;
 
-    const specUrl = slugParam
-      ? `/clients/${encodeURIComponent(slugParam)}/spec.json`
-      : '/published-spec.json';
+    async function loadServerFirstSpec() {
+      // 1. Always ask backend persistent store first so every browser sees identical live data
+      const publicApiUrl = slugParam
+        ? `/api/public/site?slug=${encodeURIComponent(slugParam)}`
+        : '/api/public/site';
 
-    const hasLocalMatch = slugParam
-      ? loadProjectsState().projects.some((p) => p.slug === slugParam)
-      : loadStoredSpec() !== null;
-
-    if (!hasLocalMatch) {
-      let cancelled = false;
-      fetch(specUrl)
-        .then((res) => (res.ok ? res.json() : null))
-        .then((parsed: LandingPageSpec | null) => {
-          if (
-            !cancelled &&
-            parsed &&
-            Array.isArray(parsed.sections) &&
-            parsed.theme &&
-            parsed.meta
-          ) {
-            setLiveSpec(parsed);
+      try {
+        const res = await fetch(publicApiUrl, { cache: 'no-store' });
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
+          const data = (await res.json()) as { ok?: boolean; spec?: unknown };
+          if (!cancelled && data.ok && isValidSpec(data.spec)) {
+            setLiveSpec(data.spec);
+            setLoadingSpec(false);
+            return;
           }
-        })
-        .catch(() => {
-          // Keep fallback spec
-        });
-      return () => {
-        cancelled = true;
-      };
+        }
+      } catch {
+        // Try static spec fallback next
+      }
+
+      // 2. Fallback to static published spec JSON
+      const staticSpecUrl = slugParam
+        ? `/clients/${encodeURIComponent(slugParam)}/spec.json`
+        : '/published-spec.json';
+
+      try {
+        const res = await fetch(staticSpecUrl, { cache: 'no-store' });
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
+          const parsed = (await res.json()) as unknown;
+          if (!cancelled && isValidSpec(parsed)) {
+            setLiveSpec(parsed);
+            setLoadingSpec(false);
+            return;
+          }
+        }
+      } catch {
+        // Fall through to read-only localStorage or default starter
+      }
+
+      // 3. Fallback to read-only localStorage (only if already saved on this browser)
+      if (!cancelled) {
+        const local = readLocalSpecReadOnly(slugParam);
+        if (local) setLiveSpec(local);
+        setLoadingSpec(false);
+      }
     }
+
+    void loadServerFirstSpec();
+    return () => {
+      cancelled = true;
+    };
   }, [isLiveMode, isReviewMode, slugParam]);
 
   useEffect(() => {
@@ -74,19 +96,40 @@ export function App() {
     }
 
     const onStorage = () => {
-      setLiveSpec(resolveInitialSpec(slugParam));
+      const local = readLocalSpecReadOnly(slugParam);
+      if (local) setLiveSpec(local);
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, [isLiveMode, isReviewMode, slugParam, liveSpec.meta.title, liveSpec.meta.description]);
 
   if (isLiveMode || isReviewMode) {
+    if (loadingSpec) {
+      return (
+        <div
+          style={{
+            minHeight: '100vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#f8fafc',
+            color: '#475569',
+            fontFamily: "'Be Vietnam Pro', sans-serif",
+            fontSize: 14,
+            fontWeight: 600,
+          }}
+        >
+          Đang đồng bộ phiên bản mới nhất...
+        </div>
+      );
+    }
+
     const syncOrderToServer = (payload: Record<string, unknown>) => {
       fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-      }).catch(() => { });
+      }).catch(() => {});
     };
 
     const pageEl = (

@@ -1,6 +1,7 @@
 import type { AboutSection as AboutSectionData } from '../../types/spec';
 import { sanitizeHref, sanitizeImageSrc } from '../../utils/storage';
 import { IconRenderer } from '../IconRenderer';
+import { useStudioFieldProps } from '../StudioFocusContext';
 
 interface Props {
   section: AboutSectionData;
@@ -12,15 +13,44 @@ export function AboutSection({ section, isStudio }: Props) {
   const surfaceClass = `lp-surface-${section.style.surface}`;
   const padClass = `lp-pad-${section.style.padding}`;
 
+  const badgeField = useStudioFieldProps(section.id, 'badge', 'Badge Giới thiệu', 'lp-badge');
+  const titleField = useStudioFieldProps(section.id, 'title', 'Tiêu đề Giới thiệu', 'lp-heading');
+  const roleField = useStudioFieldProps(section.id, 'role', 'Chức danh / Vai trò', 'lp-about-role');
+  const bioField = useStudioFieldProps(section.id, 'bio', 'Câu chuyện / Tiểu sử', 'lp-about-bio');
+  const avatarField = useStudioFieldProps(
+    section.id,
+    'avatarUrl',
+    'Ảnh chân dung',
+    section.variant === 'centered-card' ? '' : 'lp-about-photo-card'
+  );
+  const highlightsField = useStudioFieldProps(
+    section.id,
+    'highlights',
+    'Kỹ năng / Thế mạnh',
+    'lp-pill-list'
+  );
+  const milestonesField = useStudioFieldProps(
+    section.id,
+    'milestones',
+    'Cột mốc kinh nghiệm',
+    'lp-milestones'
+  );
+  const socialsField = useStudioFieldProps(
+    section.id,
+    'socials',
+    'Mạng xã hội',
+    'lp-social-row'
+  );
+
   const renderDetails = () => (
     <div>
-      {section.badge && <div className="lp-badge">{section.badge}</div>}
-      <h2 className="lp-heading">{section.title}</h2>
-      {section.role && <div className="lp-about-role">{section.role}</div>}
-      <p className="lp-about-bio">{section.bio}</p>
+      {section.badge && <div {...badgeField}>{section.badge}</div>}
+      <h2 {...titleField}>{section.title}</h2>
+      {section.role && <div {...roleField}>{section.role}</div>}
+      <p {...bioField}>{section.bio}</p>
 
       {section.highlights.length > 0 && (
-        <div className="lp-pill-list">
+        <div {...highlightsField}>
           {section.highlights.map((item, idx) => (
             <span key={idx} className="lp-pill">
               {item}
@@ -30,7 +60,7 @@ export function AboutSection({ section, isStudio }: Props) {
       )}
 
       {section.milestones.length > 0 && (
-        <div className="lp-milestones">
+        <div {...milestonesField}>
           {section.milestones.map((m) => (
             <div key={m.id} className="lp-milestone-item">
               <div className="lp-milestone-year">{m.year}</div>
@@ -44,7 +74,7 @@ export function AboutSection({ section, isStudio }: Props) {
       )}
 
       {section.socials.length > 0 && (
-        <div className="lp-social-row">
+        <div {...socialsField}>
           {section.socials.map((soc) => {
             const href = sanitizeHref(soc.href);
             const isExternal = href.startsWith('http');
@@ -76,14 +106,21 @@ export function AboutSection({ section, isStudio }: Props) {
         {section.variant === 'centered-card' ? (
           <div className="lp-card lp-about-centered">
             {safeAvatar && (
-              <img src={safeAvatar} alt={section.title} className="lp-about-centered-avatar" />
+              <img
+                src={safeAvatar}
+                alt={section.title}
+                {...avatarField}
+                className={['lp-about-centered-avatar', avatarField.className]
+                  .filter(Boolean)
+                  .join(' ')}
+              />
             )}
-            {section.badge && <div className="lp-badge">{section.badge}</div>}
-            <h2 className="lp-heading">{section.title}</h2>
-            {section.role && <div className="lp-about-role">{section.role}</div>}
-            <p className="lp-about-bio">{section.bio}</p>
+            {section.badge && <div {...badgeField}>{section.badge}</div>}
+            <h2 {...titleField}>{section.title}</h2>
+            {section.role && <div {...roleField}>{section.role}</div>}
+            <p {...bioField}>{section.bio}</p>
             {section.highlights.length > 0 && (
-              <div className="lp-pill-list" style={{ justifyContent: 'center' }}>
+              <div {...highlightsField} style={{ justifyContent: 'center' }}>
                 {section.highlights.map((item, idx) => (
                   <span key={idx} className="lp-pill">
                     {item}
@@ -92,7 +129,7 @@ export function AboutSection({ section, isStudio }: Props) {
               </div>
             )}
             {section.socials.length > 0 && (
-              <div className="lp-social-row" style={{ justifyContent: 'center' }}>
+              <div {...socialsField} style={{ justifyContent: 'center' }}>
                 {section.socials.map((soc) => (
                   <a
                     key={soc.id}
@@ -114,7 +151,7 @@ export function AboutSection({ section, isStudio }: Props) {
           >
             <div className="lp-about-photo-col">
               {safeAvatar && (
-                <div className="lp-about-photo-card">
+                <div {...avatarField}>
                   <img src={safeAvatar} alt={section.title} />
                 </div>
               )}

@@ -294,13 +294,27 @@ export async function publishSiteToServer(
   spec: LandingPageSpec,
   html: string,
   slug?: string
-): Promise<{ ok: boolean; siteUrl?: string; clientUrl?: string; error?: string }> {
+): Promise<{
+  ok: boolean;
+  unauthorized?: boolean;
+  siteUrl?: string;
+  clientUrl?: string;
+  error?: string;
+}> {
   try {
     const response = await fetch('/api/publish', {
       method: 'POST',
+      credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ spec, html, slug }),
     });
+    if (response.status === 401) {
+      return {
+        ok: false,
+        unauthorized: true,
+        error: 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.',
+      };
+    }
     const data = (await response.json()) as {
       ok?: boolean;
       siteUrl?: string;

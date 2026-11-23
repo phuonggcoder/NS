@@ -9,21 +9,26 @@ export function TextField({
   onChange,
   placeholder,
   type = 'text',
+  fieldKey,
+  onFocusField,
 }: {
   label: string;
   value: string;
   onChange: (val: string) => void;
   placeholder?: string;
   type?: string;
+  fieldKey?: string;
+  onFocusField?: (fieldKey: string, label: string) => void;
 }) {
   return (
-    <div className="st-field">
+    <div className="st-field" data-inspector-field={fieldKey}>
       <label className="st-label">{label}</label>
       <input
         type={type}
         className="st-input"
         value={value}
         placeholder={placeholder}
+        onFocus={() => fieldKey && onFocusField?.(fieldKey, label)}
         onChange={(e) => onChange(e.target.value)}
       />
     </div>
@@ -36,21 +41,26 @@ export function TextAreaField({
   onChange,
   rows = 3,
   placeholder,
+  fieldKey,
+  onFocusField,
 }: {
   label: string;
   value: string;
   onChange: (val: string) => void;
   rows?: number;
   placeholder?: string;
+  fieldKey?: string;
+  onFocusField?: (fieldKey: string, label: string) => void;
 }) {
   return (
-    <div className="st-field">
+    <div className="st-field" data-inspector-field={fieldKey}>
       <label className="st-label">{label}</label>
       <textarea
         rows={rows}
         className="st-textarea"
         value={value}
         placeholder={placeholder}
+        onFocus={() => fieldKey && onFocusField?.(fieldKey, label)}
         onChange={(e) => onChange(e.target.value)}
       />
     </div>
@@ -92,14 +102,18 @@ export function StringListEditor({
   items,
   onChange,
   placeholder = 'Nhập dòng mới...',
+  fieldKey,
+  onFocusField,
 }: {
   label: string;
   items: string[];
   onChange: (next: string[]) => void;
   placeholder?: string;
+  fieldKey?: string;
+  onFocusField?: (fieldKey: string, label: string) => void;
 }) {
   return (
-    <div className="st-field">
+    <div className="st-field" data-inspector-field={fieldKey}>
       <div
         style={{
           display: 'flex',
@@ -128,6 +142,7 @@ export function StringListEditor({
               className="st-input"
               value={item}
               placeholder={placeholder}
+              onFocus={() => fieldKey && onFocusField?.(fieldKey, label)}
               onChange={(e) => {
                 const copy = [...items];
                 copy[idx] = e.target.value;
@@ -153,10 +168,14 @@ export function ImageField({
   label,
   value,
   onChange,
+  fieldKey,
+  onFocusField,
 }: {
   label: string;
   value: string;
   onChange: (nextUrl: string) => void;
+  fieldKey?: string;
+  onFocusField?: (fieldKey: string, label: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [showGallery, setShowGallery] = useState(false);
@@ -169,6 +188,7 @@ export function ImageField({
     try {
       const compressed = await compressImageFile(file);
       onChange(compressed);
+      if (fieldKey) onFocusField?.(fieldKey, label);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : 'Không thể tải ảnh lên.');
     } finally {
@@ -178,7 +198,7 @@ export function ImageField({
   };
 
   return (
-    <div className="st-field">
+    <div className="st-field" data-inspector-field={fieldKey}>
       <label className="st-label">{label}</label>
       <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
         <input
@@ -186,6 +206,7 @@ export function ImageField({
           className="st-input"
           placeholder="Dán link ảnh https://... hoặc tải ảnh lên"
           value={value.startsWith('data:image/svg+xml') ? '[Ảnh minh họa có sẵn]' : value}
+          onFocus={() => fieldKey && onFocusField?.(fieldKey, label)}
           onChange={(e) => {
             if (e.target.value !== '[Ảnh minh họa có sẵn]') {
               onChange(e.target.value);
@@ -250,6 +271,7 @@ export function ImageField({
               onClick={() => {
                 onChange(item.url);
                 setShowGallery(false);
+                if (fieldKey) onFocusField?.(fieldKey, label);
               }}
               style={{
                 border: '1px solid #cbd5e1',

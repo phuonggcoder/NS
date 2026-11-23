@@ -10,6 +10,7 @@ import {
   verifyAdminPassword,
 } from './server-auth.mjs';
 import {
+  getPublicSiteSpec,
   getPublishedSite,
   getStorageMode,
   listPublishedSites,
@@ -143,7 +144,7 @@ export async function handleApiRequest(req, res, options = {}) {
   applySecurityHeaders(res, req);
 
   try {
-    // 1. Health Check (Public)
+    // 1. Health Check & Public Live Spec (Public, read-only)
     if (pathname === '/api/health' && req.method === 'GET') {
       const state = await getAuthState(rootDir);
       sendJson(res, 200, {
@@ -152,6 +153,22 @@ export async function handleApiRequest(req, res, options = {}) {
         storageMode: getStorageMode(),
         authConfigured: state.configured,
         time: new Date().toISOString(),
+      });
+      return true;
+    }
+
+    if (pathname === '/api/public/site' && req.method === 'GET') {
+      const slugParam = urlObj.searchParams.get('slug');
+      const result = await getPublicSiteSpec(slugParam || null, rootDir);
+      if (!result) {
+        sendJson(res, 404, { ok: false, error: 'Chưa có trang web nào được lưu.' });
+        return true;
+      }
+      sendJson(res, 200, {
+        ok: true,
+        slug: result.slug,
+        projectName: result.projectName,
+        spec: result.spec,
       });
       return true;
     }

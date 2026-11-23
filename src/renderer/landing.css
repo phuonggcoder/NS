@@ -117,6 +117,54 @@
   color: #fecaca;
 }
 
+/* Canva-Style Element Focus Framing (Studio Only) */
+.lp-editable-el {
+  position: relative;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: outline-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.lp-editable-el:hover {
+  outline: 1.5px dashed rgba(37, 99, 235, 0.65);
+  outline-offset: 4px;
+}
+
+.lp-canva-active {
+  outline: 2px solid #2563eb !important;
+  outline-offset: 5px;
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.14);
+  z-index: 6;
+}
+
+.lp-canva-active::after {
+  content: attr(data-lp-field-label);
+  position: absolute;
+  top: -26px;
+  left: -2px;
+  padding: 2px 9px;
+  border-radius: 6px;
+  background: #2563eb;
+  color: #ffffff;
+  font-family: 'Be Vietnam Pro', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
+  z-index: 35;
+}
+
+.lp-clean-preview .lp-editor-wrap:hover,
+.lp-clean-preview .lp-editor-wrap.is-selected {
+  outline: none !important;
+}
+
+.lp-clean-preview .lp-editor-toolbar {
+  display: none !important;
+}
+
 /* Section Surfaces & Spacing */
 .lp-section {
   position: relative;

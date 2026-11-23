@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import type { ContactLead, ContactSection as ContactSectionData } from '../../types/spec';
 import { generateId, sanitizeHref } from '../../utils/storage';
 import { IconRenderer } from '../IconRenderer';
+import { useStudioFieldProps } from '../StudioFocusContext';
 
 interface Props {
   section: ContactSectionData;
@@ -18,6 +19,22 @@ export function ContactSection({ section, isStudio, onSubmitLead }: Props) {
 
   const surfaceClass = `lp-surface-${section.style.surface}`;
   const padClass = `lp-pad-${section.style.padding}`;
+
+  const badgeField = useStudioFieldProps(section.id, 'badge', 'Badge Liên hệ', 'lp-badge');
+  const titleField = useStudioFieldProps(section.id, 'title', 'Tiêu đề Liên hệ', 'lp-heading');
+  const subField = useStudioFieldProps(section.id, 'subtitle', 'Mô tả Liên hệ', 'lp-subtitle');
+  const infoField = useStudioFieldProps(
+    section.id,
+    'contactInfo',
+    'SĐT, Email & Địa chỉ',
+    'lp-contact-info-list'
+  );
+  const formField = useStudioFieldProps(
+    section.id,
+    'formSubmitLabel',
+    'Form liên hệ',
+    'lp-card lp-form-card'
+  );
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -41,7 +58,7 @@ export function ContactSection({ section, isStudio, onSubmitLead }: Props) {
   };
 
   const renderForm = () => (
-    <div className="lp-card lp-form-card">
+    <div {...formField}>
       {submitted ? (
         <div className="lp-form-success" data-lp-contact-success="true">
           <div style={{ marginBottom: 10 }}>{section.successMessage}</div>
@@ -107,11 +124,7 @@ export function ContactSection({ section, isStudio, onSubmitLead }: Props) {
             <span>{section.formSubmitLabel || 'Gửi liên hệ'}</span>
             <IconRenderer name="arrow-right" size={16} />
           </button>
-          <div
-            className="lp-form-success"
-            data-lp-contact-success="true"
-            hidden
-          >
+          <div className="lp-form-success" data-lp-contact-success="true" hidden>
             {section.successMessage}
           </div>
         </form>
@@ -121,11 +134,11 @@ export function ContactSection({ section, isStudio, onSubmitLead }: Props) {
 
   const renderInfo = () => (
     <div>
-      {section.badge && <div className="lp-badge">{section.badge}</div>}
-      <h2 className="lp-heading">{section.title}</h2>
-      {section.subtitle && <p className="lp-subtitle">{section.subtitle}</p>}
+      {section.badge && <div {...badgeField}>{section.badge}</div>}
+      <h2 {...titleField}>{section.title}</h2>
+      {section.subtitle && <p {...subField}>{section.subtitle}</p>}
 
-      <div className="lp-contact-info-list">
+      <div {...infoField}>
         {section.phone && (
           <div className="lp-contact-info-item">
             <span className="lp-contact-icon">
@@ -185,9 +198,9 @@ export function ContactSection({ section, isStudio, onSubmitLead }: Props) {
         {section.variant === 'centered' ? (
           <div className="lp-contact-centered">
             <div style={{ textAlign: 'center', marginBottom: 28 }}>
-              {section.badge && <div className="lp-badge">{section.badge}</div>}
-              <h2 className="lp-heading">{section.title}</h2>
-              {section.subtitle && <p className="lp-subtitle">{section.subtitle}</p>}
+              {section.badge && <div {...badgeField}>{section.badge}</div>}
+              <h2 {...titleField}>{section.title}</h2>
+              {section.subtitle && <p {...subField}>{section.subtitle}</p>}
             </div>
             {renderForm()}
           </div>

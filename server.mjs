@@ -3,12 +3,12 @@ import http from 'node:http';
 import path from 'node:path';
 import { handleApiRequest, handlePublishedAssetRequest } from './server-api.mjs';
 import { applySecurityHeaders } from './server-auth.mjs';
-import { getStorageMode, resolveSafeChild } from './server-store.mjs';
+import { getPublicDir, getStorageMode, resolveSafeChild } from './server-store.mjs';
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const ROOT_DIR = process.cwd();
-const PUBLIC_DIR = path.resolve(ROOT_DIR, 'public');
+const PUBLIC_DIR = getPublicDir(ROOT_DIR);
 const DIST_DIR = path.resolve(ROOT_DIR, 'dist');
 
 const MIME_TYPES = {
