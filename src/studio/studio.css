@@ -1006,3 +1006,59 @@ body,
   border: 1px solid #e2e8f0;
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
 }
+
+/* Responsive Studio Workspace for Laptop / Tablet / Mobile */
+@media (max-width: 1120px) {
+  .st-workspace {
+    position: relative;
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .st-sidebar {
+    position: fixed;
+    top: 52px;
+    bottom: 0;
+    left: 0;
+    width: min(320px, 88vw);
+    z-index: 60;
+    box-shadow: 12px 0 32px rgba(15, 23, 42, 0.18);
+  }
+
+  .st-inspector {
+    position: fixed;
+    top: 52px;
+    bottom: 0;
+    right: 0;
+    width: min(360px, 92vw);
+    z-index: 60;
+    box-shadow: -12px 0 32px rgba(15, 23, 42, 0.18);
+  }
+}
+
+@media (max-width: 760px) {
+  .st-topbar-min {
+    height: auto;
+    min-height: 52px;
+    padding: 6px 10px;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .st-center-tools {
+    display: none;
+  }
+
+  .st-actions-group .st-btn span {
+    display: none;
+  }
+
+  .st-modal {
+    width: 98vw !important;
+    max-height: 94vh !important;
+  }
+
+  .st-modal-body[style*="grid-template-columns"] {
+    grid-template-columns: 1fr !important;
+    overflow-y: auto !important;
+  }
+}

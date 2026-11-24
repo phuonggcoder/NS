@@ -380,11 +380,18 @@ export function buildThemeStyle(theme: ThemeConfig): CSSProperties {
 
   const radii = radiusMap[theme.shape.radius] ?? radiusMap.rounded;
   const scales = scaleMap[theme.typography.scale] ?? scaleMap.standard;
+  const fontSizeMult =
+    theme.typography.fontSize === 'sm'
+      ? 0.93
+      : theme.typography.fontSize === 'lg'
+        ? 1.08
+        : 1;
   const sectionPy = spacingMap[theme.spacing] ?? spacingMap.standard;
   const containerMax = widthMap[theme.containerWidth ?? 'standard'] ?? '1180px';
 
   // Determine actual visual brightness from background hex so Light/Dark never desyncs
   const actualDark = !isLightColor(theme.colors.background);
+  const secondaryColor = theme.colors.secondary || theme.colors.accent;
   const primaryRgb = hexToRgbTuple(theme.colors.primary);
   const accentRgb = hexToRgbTuple(theme.colors.accent);
   const bgRgb = hexToRgbTuple(theme.colors.background);
@@ -399,6 +406,7 @@ export function buildThemeStyle(theme: ThemeConfig): CSSProperties {
 
   const vars: Record<string, string> = {
     '--lp-primary': theme.colors.primary,
+    '--lp-secondary': secondaryColor,
     '--lp-accent': theme.colors.accent,
     '--lp-primary-rgb': primaryRgb,
     '--lp-accent-rgb': accentRgb,
@@ -447,9 +455,10 @@ export function buildThemeStyle(theme: ThemeConfig): CSSProperties {
     '--lp-badge-radius': radii.badge,
     '--lp-font-heading': theme.typography.headingFont,
     '--lp-font-body': theme.typography.bodyFont,
+    '--lp-font-scale': String(fontSizeMult),
     '--lp-hero-size': scales.hero,
     '--lp-section-title-size': scales.section,
-    '--lp-body-size': scales.body,
+    '--lp-body-size': `calc(${scales.body} * ${fontSizeMult})`,
     '--lp-section-py': sectionPy,
     '--lp-container-max': containerMax,
   };

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Code2, Copy, Download, ExternalLink, Globe, X } from 'lucide-react';
+import { Check, Code2, Copy, Download, ExternalLink, Globe, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import type { ClientProject } from '../types/spec';
 
 interface PublishModalProps {
@@ -9,6 +9,7 @@ interface PublishModalProps {
   lastPublishedUrl?: string;
   onClose: () => void;
   onPublishToServer: () => void;
+  onRegenerateReviewToken: () => void;
   onDownloadHtml: () => void;
   onDownloadSpecJson: () => void;
 }
@@ -20,6 +21,7 @@ export function PublishModal({
   lastPublishedUrl,
   onClose,
   onPublishToServer,
+  onRegenerateReviewToken,
   onDownloadHtml,
   onDownloadSpecJson,
 }: PublishModalProps) {
@@ -28,9 +30,11 @@ export function PublishModal({
   if (!open) return null;
 
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const reviewUrl = `${origin}/?mode=review&slug=${encodeURIComponent(project.slug)}`;
+  const tokenQuery = project.reviewToken ? `&token=${encodeURIComponent(project.reviewToken)}` : '';
+  const reviewUrl = `${origin}/?mode=review&slug=${encodeURIComponent(project.slug)}${tokenQuery}`;
   const liveUrl = `${origin}/?mode=live&slug=${encodeURIComponent(project.slug)}`;
   const staticClientUrl = `${origin}/clients/${encodeURIComponent(project.slug)}/index.html`;
+  const menuUrl = `${origin}/menu/${encodeURIComponent(project.slug)}`;
 
   const copyLink = async (key: string, text: string) => {
     try {
@@ -51,7 +55,7 @@ export function PublishModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="st-modal" style={{ maxWidth: 660 }}>
+      <div className="st-modal" style={{ maxWidth: 680 }}>
         <div className="st-modal-head">
           <div>
             <div style={{ fontWeight: 700, fontSize: 16 }}>
@@ -69,10 +73,10 @@ export function PublishModal({
         <div className="st-modal-body">
           <div className="st-subcard" style={{ background: '#eff6ff', borderColor: '#bfdbfe' }}>
             <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 6 }}>
-              Bước 1: Xuất bản bản mới nhất lên Server
+              Bước 1: Xuất bản bản chính thức (Published)
             </div>
             <p style={{ fontSize: 12.5, color: '#334155', margin: '0 0 10px' }}>
-              Lưu trang HTML độc lập vào <code>/clients/{project.slug}/index.html</code> và cập nhật trang chính <code>/site.html</code> để gửi link cho khách hàng truy cập.
+              Bản Nháp (Draft) chỉ xem qua link có Token bảo mật. Khi xuất bản, hệ thống sẽ cập nhật trang công khai <code>/clients/{project.slug}/index.html</code> và lưu mốc Version History.
             </p>
             <button
               type="button"
@@ -81,21 +85,33 @@ export function PublishModal({
               onClick={onPublishToServer}
             >
               <Globe size={15} />
-              <span>{isPublishing ? 'Đang xuất bản...' : 'Xuất bản ngay lên Server'}</span>
+              <span>{isPublishing ? 'Đang xuất bản...' : 'Xuất bản bản chính thức'}</span>
             </button>
             {lastPublishedUrl && (
               <div style={{ marginTop: 10, fontSize: 12.5, color: '#15803d', fontWeight: 600 }}>
-                ✅ Đã xuất bản thành công! Khách hàng có thể mở ngay link bên dưới.
+                ✅ Đã xuất bản thành công! Link công khai đã cập nhật phiên bản mới nhất.
               </div>
             )}
           </div>
 
           <div className="st-group">
-            <div className="st-group-title">Bước 2: Link gửi cho khách hàng</div>
+            <div className="st-group-title">Bước 2: Phân tách Link Nháp (Review) & Link Chính thức (Live)</div>
 
             <div className="st-subcard">
               <div className="st-subcard-head">
-                <span>1. Link Gửi khách Xem & Duyệt mẫu (Có thanh góp ý)</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                  <ShieldCheck size={14} color="#b45309" />
+                  <span>1. Link Xem trước bản Nháp (Có Token bảo mật cho khách duyệt)</span>
+                </span>
+                <button
+                  type="button"
+                  className="st-btn st-btn-sm"
+                  onClick={onRegenerateReviewToken}
+                  title="Tạo mã bảo mật mới & gửi lại bản Preview"
+                >
+                  <RefreshCw size={12} />
+                  <span>Tạo lại Token</span>
+                </button>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input type="text" readOnly className="st-input" value={reviewUrl} />
@@ -107,12 +123,7 @@ export function PublishModal({
                   {copiedKey === 'review' ? <Check size={13} /> : <Copy size={13} />}
                   <span>{copiedKey === 'review' ? 'Đã chép' : 'Chép'}</span>
                 </button>
-                <a
-                  href={reviewUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="st-btn st-btn-sm"
-                >
+                <a href={reviewUrl} target="_blank" rel="noopener noreferrer" className="st-btn st-btn-sm">
                   <ExternalLink size={13} />
                 </a>
               </div>
@@ -120,7 +131,7 @@ export function PublishModal({
 
             <div className="st-subcard">
               <div className="st-subcard-head">
-                <span>2. Link Trang Khách Hàng Độc lập (File HTML tĩnh đã xuất bản)</span>
+                <span>2. Link Trang Chính thức đã Xuất bản (HTML tĩnh)</span>
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 <input type="text" readOnly className="st-input" value={staticClientUrl} />
@@ -132,12 +143,7 @@ export function PublishModal({
                   {copiedKey === 'static' ? <Check size={13} /> : <Copy size={13} />}
                   <span>{copiedKey === 'static' ? 'Đã chép' : 'Chép'}</span>
                 </button>
-                <a
-                  href={staticClientUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="st-btn st-btn-sm"
-                >
+                <a href={staticClientUrl} target="_blank" rel="noopener noreferrer" className="st-btn st-btn-sm">
                   <ExternalLink size={13} />
                 </a>
               </div>
@@ -145,26 +151,31 @@ export function PublishModal({
 
             <div className="st-subcard">
               <div className="st-subcard-head">
-                <span>3. Link Xem Live theo Spec (/?mode=live)</span>
+                <span>3. Link Xem Live (/?mode=live) & Digital Menu QR</span>
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <input type="text" readOnly className="st-input" value={liveUrl} />
-                <button
-                  type="button"
-                  className="st-btn st-btn-sm"
-                  onClick={() => copyLink('live', liveUrl)}
-                >
-                  {copiedKey === 'live' ? <Check size={13} /> : <Copy size={13} />}
-                  <span>{copiedKey === 'live' ? 'Đã chép' : 'Chép'}</span>
-                </button>
-                <a
-                  href={liveUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="st-btn st-btn-sm"
-                >
-                  <ExternalLink size={13} />
-                </a>
+              <div style={{ display: 'grid', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input type="text" readOnly className="st-input" value={liveUrl} />
+                  <button type="button" className="st-btn st-btn-sm" onClick={() => copyLink('live', liveUrl)}>
+                    {copiedKey === 'live' ? <Check size={13} /> : <Copy size={13} />}
+                    <span>{copiedKey === 'live' ? 'Đã chép' : 'Chép'}</span>
+                  </button>
+                  <a href={liveUrl} target="_blank" rel="noopener noreferrer" className="st-btn st-btn-sm">
+                    <ExternalLink size={13} />
+                  </a>
+                </div>
+                {project.spec.digitalMenu?.enabled && (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <input type="text" readOnly className="st-input" value={menuUrl} />
+                    <button type="button" className="st-btn st-btn-sm" onClick={() => copyLink('menu', menuUrl)}>
+                      {copiedKey === 'menu' ? <Check size={13} /> : <Copy size={13} />}
+                      <span>{copiedKey === 'menu' ? 'Đã chép' : 'Chép'}</span>
+                    </button>
+                    <a href={menuUrl} target="_blank" rel="noopener noreferrer" className="st-btn st-btn-sm">
+                      <ExternalLink size={13} />
+                    </a>
+                  </div>
+                )}
               </div>
             </div>
           </div>

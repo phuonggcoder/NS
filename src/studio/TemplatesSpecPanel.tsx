@@ -1,12 +1,15 @@
-import { useRef, type ChangeEvent } from 'react';
-import { RotateCcw, Upload } from 'lucide-react';
+import { useRef, useState, type ChangeEvent } from 'react';
+import { Eye, RotateCcw, Upload } from 'lucide-react';
 import { STARTER_TEMPLATES } from '../data/templates';
 import type { LandingPageSpec, SiteMeta } from '../types/spec';
+import { cloneSpec } from '../utils/storage';
 
 interface TemplatesSpecPanelProps {
   currentTemplateId: string;
+  currentSpec: LandingPageSpec;
   meta: SiteMeta;
-  onSelectTemplate: (templateId: string) => void;
+  onSelectTemplate: (templateId: string, preserveBrand?: boolean) => void;
+  onPreviewTemplate?: (previewSpec: LandingPageSpec, label: string) => void;
   onUpdateMeta: (next: SiteMeta) => void;
   onImportSpec: (spec: LandingPageSpec) => void;
   onResetDefault: () => void;
@@ -16,11 +19,13 @@ export function TemplatesSpecPanel({
   currentTemplateId,
   meta,
   onSelectTemplate,
+  onPreviewTemplate,
   onUpdateMeta,
   onImportSpec,
   onResetDefault,
 }: TemplatesSpecPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [preserveBrand, setPreserveBrand] = useState(true);
 
   const handleImportJson = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -43,16 +48,37 @@ export function TemplatesSpecPanel({
   return (
     <div>
       <div className="st-group">
-        <div className="st-group-title">Mẫu Landing Page Khởi tạo</div>
+        <div className="st-group-title">Thư viện Template theo ngành ({STARTER_TEMPLATES.length})</div>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            fontSize: 12,
+            marginBottom: 10,
+            padding: '7px 9px',
+            borderRadius: 8,
+            background: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={preserveBrand}
+            onChange={(e) => setPreserveBrand(e.target.checked)}
+          />
+          <span>Giữ lại Tiêu đề & Mô tả thương hiệu khi đổi mẫu</span>
+        </label>
+
         <div className="st-preset-grid">
           {STARTER_TEMPLATES.map((tpl) => {
             const isActive = currentTemplateId === tpl.id;
             return (
-              <button
+              <div
                 key={tpl.id}
-                type="button"
                 className={`st-preset-card ${isActive ? 'is-active' : ''}`}
-                onClick={() => onSelectTemplate(tpl.id)}
+                style={{ display: 'grid', gap: 6 }}
               >
                 <div
                   style={{
@@ -60,7 +86,6 @@ export function TemplatesSpecPanel({
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     gap: 8,
-                    marginBottom: 4,
                   }}
                 >
                   <span style={{ fontWeight: 700, fontSize: 13 }}>{tpl.name}</span>
@@ -72,6 +97,7 @@ export function TemplatesSpecPanel({
                       borderRadius: 999,
                       background: isActive ? '#007aff' : '#e2e8f0',
                       color: isActive ? '#ffffff' : '#475569',
+                      whiteSpace: 'nowrap',
                     }}
                   >
                     {tpl.tag}
@@ -80,32 +106,36 @@ export function TemplatesSpecPanel({
                 <div style={{ fontSize: 11.5, color: '#64748b', lineHeight: 1.4 }}>
                   {tpl.description}
                 </div>
-              </button>
+                <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                  {onPreviewTemplate && (
+                    <button
+                      type="button"
+                      className="st-btn st-btn-sm"
+                      onClick={() =>
+                        onPreviewTemplate(cloneSpec(tpl.spec), `Xem thử mẫu: ${tpl.name}`)
+                      }
+                    >
+                      <Eye size={12} />
+                      <span>Xem thử</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="st-btn st-btn-sm st-btn-primary"
+                    style={{ flex: 1 }}
+                    onClick={() => onSelectTemplate(tpl.id, preserveBrand)}
+                  >
+                    {isActive ? 'Đang dùng' : 'Áp dụng mẫu'}
+                  </button>
+                </div>
+              </div>
             );
           })}
         </div>
       </div>
 
       <div className="st-group">
-        <div className="st-group-title">Thông tin SEO & Trang Khách hàng</div>
-        <div className="st-field">
-          <label className="st-label">Tiêu đề tab trình duyệt</label>
-          <input
-            type="text"
-            className="st-input"
-            value={meta.title}
-            onChange={(e) => onUpdateMeta({ ...meta, title: e.target.value })}
-          />
-        </div>
-        <div className="st-field">
-          <label className="st-label">Mô tả SEO (Meta Description)</label>
-          <textarea
-            rows={3}
-            className="st-textarea"
-            value={meta.description}
-            onChange={(e) => onUpdateMeta({ ...meta, description: e.target.value })}
-          />
-        </div>
+        <div className="st-group-title">Thông tin cơ bản & CSS tùy biến</div>
         <div className="st-field">
           <label className="st-label">Icon Favicon (Emoji)</label>
           <input
@@ -173,6 +203,7 @@ export function TemplatesSpecPanel({
             </>
           )}
         </div>
+
         <div className="st-subcard" style={{ marginTop: 10 }}>
           <div className="st-label">CSS tùy biến nâng cao (Tùy chọn)</div>
           <textarea

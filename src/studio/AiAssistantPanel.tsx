@@ -1,25 +1,35 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Check,
   CheckCheck,
+  Copy,
   Eye,
-  KeyRound,
+  PenLine,
   SearchCheck,
+  ShieldCheck,
   Sparkles,
   Wand2,
   X,
 } from 'lucide-react';
 import type {
-  AiProviderSettings,
+  AiCopyResult,
+  AiCopyTask,
+  AiServerStatus,
   AiSuggestion,
   AutoFillBlockKey,
   AutoFillResult,
   SuggestionCategory,
 } from '../ai/aiTypes';
-import { loadAiSettings, runAudit, runAutoFill, saveAiSettings } from '../ai/llmClient';
+import {
+  fetchAiServerStatus,
+  generateAiCopy,
+  runAudit,
+  runAutoFill,
+} from '../ai/llmClient';
 import { applyAutoFillSelection, SAMPLE_BRIEFS } from '../ai/localAutoFill';
 import type { LandingPageSpec } from '../types/spec';
+import { cloneSpec } from '../utils/storage';
 
 interface AiAssistantPanelProps {
   spec: LandingPageSpec;
@@ -33,7 +43,19 @@ interface AiAssistantPanelProps {
   onSetSuggestions: (next: AiSuggestion[]) => void;
 }
 
-type AiTab = 'autofill' | 'audit' | 'settings';
+type AiTab = 'copywriter' | 'autofill' | 'audit' | 'status';
+
+const COPY_TASKS: { key: AiCopyTask; label: string }[] = [
+  { key: 'website_copy', label: 'Nội dung Website' },
+  { key: 'product_desc', label: 'Mô tả Sản phẩm' },
+  { key: 'menu_item_desc', label: 'Mô tả Món ăn / Đồ uống' },
+  { key: 'headlines', label: 'Gợi ý Tiêu đề' },
+  { key: 'ad_copy', label: 'Nội dung Quảng cáo' },
+  { key: 'normalize', label: 'Chuẩn hóa văn phong' },
+  { key: 'translate', label: 'Dịch đa ngôn ngữ' },
+  { key: 'spellcheck', label: 'Kiểm tra chính tả' },
+  { key: 'seo_suggestions', label: 'Gợi ý cải thiện SEO' },
+];
 
 const BLOCK_LABELS: { key: AutoFillBlockKey; label: string }[] = [
   { key: 'meta', label: 'Thương hiệu & Tiêu đề SEO' },
@@ -65,8 +87,21 @@ export function AiAssistantPanel({
   suggestions,
   onSetSuggestions,
 }: AiAssistantPanelProps) {
-  const [tab, setTab] = useState<AiTab>('autofill');
-  const [settings, setSettings] = useState<AiProviderSettings>(() => loadAiSettings());
+  const [tab, setTab] = useState<AiTab>('copywriter');
+  const [serverStatus, setServerStatus] = useState<AiServerStatus>({
+    configured: false,
+    provider: 'local',
+    model: 'specpage-local-vi-v2',
+  });
+
+  // Copywriter Workbench state
+  const [copyTask, setCopyTask] = useState<AiCopyTask>('menu_item_desc');
+  const [copyInput, setCopyInput] = useState('');
+  const [targetLang, setTargetLang] = useState('English');
+  const [generatingCopy, setGeneratingCopy] = useState(false);
+  const [copyResult, setCopyResult] = useState<AiCopyResult | null>(null);
+  const [editableDraft, setEditableDraft] = useState('');
+  const [copiedFlag, setCopiedFlag] = useState(false);
 
   // Auto-fill state
   const [rawText, setRawText] = useState('');
@@ -89,11 +124,54 @@ export function AiAssistantPanel({
   const [catFilter, setCatFilter] = useState<'all' | SuggestionCategory>('all');
   const [activePreviewSugId, setActivePreviewSugId] = useState<string | null>(null);
 
+  useEffect(() => {
+    void fetchAiServerStatus().then(setServerStatus);
+  }, []);
+
+  const handleGenerateCopy = async () => {
+    if (!copyInput.trim()) return;
+    setGeneratingCopy(true);
+    try {
+      const res = await generateAiCopy({
+        task: copyTask,
+        input: copyInput,
+        brandName: spec.meta.title.split('—')[0]?.trim(),
+        targetLanguage: targetLang,
+      });
+      setCopyResult(res);
+      // Put result into editable draft so user always reviews/edits before applying
+      setEditableDraft(res.text);
+    } finally {
+      setGeneratingCopy(false);
+    }
+  };
+
+  const handleCopyDraft = async () => {
+    if (!editableDraft.trim()) return;
+    try {
+      await navigator.clipboard.writeText(editableDraft);
+      setCopiedFlag(true);
+      window.setTimeout(() => setCopiedFlag(false), 1600);
+    } catch {
+      // Ignore clipboard failure
+    }
+  };
+
+  const handleApplyDraftToHeroSubheadline = () => {
+    if (!editableDraft.trim()) return;
+    const next = cloneSpec(spec);
+    const hero = next.sections.find((s) => s.type === 'hero');
+    if (hero && hero.type === 'hero') {
+      hero.subheadline = editableDraft.trim();
+      onApplySpec(next, 'Đã áp dụng nội dung AI (sau khi bạn chỉnh sửa) vào phần Hero.');
+    }
+  };
+
   const handleAnalyzeRawText = async () => {
     if (!rawText.trim()) return;
     setExtracting(true);
     try {
-      const result = await runAutoFill(rawText, spec, settings);
+      const result = await runAutoFill(rawText, spec);
       setAutoFillResult(result);
     } finally {
       setExtracting(false);
@@ -118,7 +196,7 @@ export function AiAssistantPanel({
     setAuditWarning(null);
     setActivePreviewSugId(null);
     try {
-      const res = await runAudit(spec, settings);
+      const res = await runAudit(spec);
       onSetSuggestions(res.suggestions);
       if (res.warning) setAuditWarning(res.warning);
     } finally {
@@ -188,9 +266,9 @@ export function AiAssistantPanel({
           <div>
             <div style={{ fontWeight: 700, fontSize: 13.5 }}>Trợ lý AI SpecPage</div>
             <div style={{ fontSize: 11, color: '#475569' }}>
-              {settings.mode === 'local'
-                ? 'AI Cục bộ (Nhanh, không cần API key)'
-                : `Đang kết nối ${settings.mode.toUpperCase()}`}
+              {serverStatus.configured
+                ? `Server AI: ${serverStatus.provider.toUpperCase()} (${serverStatus.model})`
+                : 'AI Cục bộ & Server Proxy an toàn'}
             </div>
           </div>
         </div>
@@ -199,40 +277,148 @@ export function AiAssistantPanel({
         </button>
       </div>
 
-      <div className="st-panel-tabs">
+      <div className="st-panel-tabs" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+        <button
+          type="button"
+          className={`st-tab-btn ${tab === 'copywriter' ? 'is-active' : ''}`}
+          onClick={() => setTab('copywriter')}
+        >
+          <PenLine size={12} />
+          <span>Viết bài</span>
+        </button>
         <button
           type="button"
           className={`st-tab-btn ${tab === 'autofill' ? 'is-active' : ''}`}
           onClick={() => setTab('autofill')}
         >
-          <Wand2 size={13} />
-          <span>Điền tự động</span>
+          <Wand2 size={12} />
+          <span>Điền mẫu</span>
         </button>
         <button
           type="button"
           className={`st-tab-btn ${tab === 'audit' ? 'is-active' : ''}`}
           onClick={() => setTab('audit')}
         >
-          <SearchCheck size={13} />
-          <span>Kiểm lỗi ({pendingSuggestions.length})</span>
+          <SearchCheck size={12} />
+          <span>Lỗi ({pendingSuggestions.length})</span>
         </button>
         <button
           type="button"
-          className={`st-tab-btn ${tab === 'settings' ? 'is-active' : ''}`}
-          onClick={() => setTab('settings')}
+          className={`st-tab-btn ${tab === 'status' ? 'is-active' : ''}`}
+          onClick={() => setTab('status')}
         >
-          <KeyRound size={13} />
-          <span>Cài đặt</span>
+          <ShieldCheck size={12} />
+          <span>Server</span>
         </button>
       </div>
 
       <div className="st-scroll-body">
+        {tab === 'copywriter' && (
+          <div>
+            <div className="st-group">
+              <div className="st-group-title">Trợ lý viết nội dung & SEO</div>
+              <div className="st-field">
+                <label className="st-label">Tác vụ AI</label>
+                <select
+                  className="st-select"
+                  value={copyTask}
+                  onChange={(e) => setCopyTask(e.target.value as AiCopyTask)}
+                >
+                  {COPY_TASKS.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {copyTask === 'translate' && (
+                <div className="st-field">
+                  <label className="st-label">Ngôn ngữ đích</label>
+                  <select
+                    className="st-select"
+                    value={targetLang}
+                    onChange={(e) => setTargetLang(e.target.value)}
+                  >
+                    <option value="English">Tiếng Anh (English)</option>
+                    <option value="Vietnamese">Tiếng Việt</option>
+                    <option value="Japanese">Tiếng Nhật (日本語)</option>
+                    <option value="Korean">Tiếng Hàn (한국어)</option>
+                    <option value="Chinese">Tiếng Trung (中文)</option>
+                  </select>
+                </div>
+              )}
+
+              <div className="st-field">
+                <label className="st-label">Nội dung gốc / Mô tả ngắn</label>
+                <textarea
+                  rows={4}
+                  className="st-textarea"
+                  placeholder="Nhập tên món, tên sản phẩm hoặc đoạn văn cần viết lại / kiểm tra chính tả / dịch..."
+                  value={copyInput}
+                  onChange={(e) => setCopyInput(e.target.value)}
+                />
+              </div>
+
+              <button
+                type="button"
+                className="st-btn st-btn-primary"
+                style={{ width: '100%' }}
+                disabled={!copyInput.trim() || generatingCopy}
+                onClick={() => void handleGenerateCopy()}
+              >
+                <Sparkles size={14} />
+                <span>{generatingCopy ? 'Đang xử lý...' : 'Tạo gợi ý nội dung'}</span>
+              </button>
+            </div>
+
+            {copyResult && (
+              <div className="st-group">
+                <div className="st-group-title">
+                  Chỉnh sửa kết quả trước khi dùng ({copyResult.providerUsed})
+                </div>
+                {copyResult.warning && <div className="st-ai-warn">{copyResult.warning}</div>}
+
+                <textarea
+                  rows={6}
+                  className="st-textarea"
+                  value={editableDraft}
+                  onChange={(e) => setEditableDraft(e.target.value)}
+                />
+
+                {copyResult.notes && copyResult.notes.length > 0 && (
+                  <ul style={{ margin: '8px 0', paddingLeft: 18, fontSize: 11.5, color: '#475569' }}>
+                    {copyResult.notes.map((n, i) => (
+                      <li key={i}>{n}</li>
+                    ))}
+                  </ul>
+                )}
+
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                  <button type="button" className="st-btn st-btn-sm" onClick={() => void handleCopyDraft()}>
+                    {copiedFlag ? <Check size={12} /> : <Copy size={12} />}
+                    <span>{copiedFlag ? 'Đã chép' : 'Chép để dán vào Menu/Section'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="st-btn st-btn-sm st-btn-primary"
+                    onClick={handleApplyDraftToHeroSubheadline}
+                  >
+                    <Check size={12} />
+                    <span>Áp dụng vào mô tả Hero</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {tab === 'autofill' && (
           <div>
             <div className="st-group">
               <div className="st-group-title">Dán thông tin khách hàng / sản phẩm</div>
               <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 8px', lineHeight: 1.45 }}>
-                Dán bài viết Facebook, tin nhắn Zalo, CV giới thiệu bản thân hoặc bảng giá. AI sẽ tách và điền vào đúng từng khối.
+                Dán bài viết Facebook, tin nhắn Zalo, CV hoặc bảng giá. AI sẽ tách để bạn xem thử trước khi áp dụng.
               </p>
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
@@ -252,7 +438,7 @@ export function AiAssistantPanel({
               <textarea
                 rows={7}
                 className="st-textarea"
-                placeholder="Ví dụ:&#10;Minh Anh Skincare — Chuyên gia chăm sóc da&#10;Serum B5 390.000đ (Giá gốc 520.000đ) - Cấp ẩm sâu...&#10;SĐT: 0909 123 456&#10;Email: cskh@minhanh.vn"
+                placeholder="Dán mô tả thương hiệu, sản phẩm, giá bán, SĐT, email..."
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
               />
@@ -262,7 +448,7 @@ export function AiAssistantPanel({
                 className="st-btn st-btn-primary"
                 style={{ width: '100%', marginTop: 8 }}
                 disabled={!rawText.trim() || extracting}
-                onClick={handleAnalyzeRawText}
+                onClick={() => void handleAnalyzeRawText()}
               >
                 <Sparkles size={14} />
                 <span>{extracting ? 'Đang phân tích...' : 'Phân tích & Chuẩn bị điền'}</span>
@@ -275,15 +461,7 @@ export function AiAssistantPanel({
                 {autoFillResult.warning && (
                   <div className="st-ai-warn">{autoFillResult.warning}</div>
                 )}
-                <ul
-                  style={{
-                    margin: '0 0 12px',
-                    paddingLeft: 18,
-                    fontSize: 12,
-                    color: '#334155',
-                    lineHeight: 1.55,
-                  }}
-                >
+                <ul style={{ margin: '0 0 12px', paddingLeft: 18, fontSize: 12, color: '#334155', lineHeight: 1.55 }}>
                   {autoFillResult.summary.map((line, idx) => (
                     <li key={idx}>{line}</li>
                   ))}
@@ -313,12 +491,7 @@ export function AiAssistantPanel({
                 </div>
 
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    type="button"
-                    className="st-btn"
-                    style={{ flex: 1 }}
-                    onClick={handlePreviewAutoFill}
-                  >
+                  <button type="button" className="st-btn" style={{ flex: 1 }} onClick={handlePreviewAutoFill}>
                     <Eye size={14} />
                     <span>Xem thử</span>
                   </button>
@@ -329,7 +502,7 @@ export function AiAssistantPanel({
                     onClick={handleApplyAutoFill}
                   >
                     <Check size={14} />
-                    <span>Áp dụng ngay</span>
+                    <span>Áp dụng</span>
                   </button>
                 </div>
               </div>
@@ -345,7 +518,7 @@ export function AiAssistantPanel({
                 className="st-btn st-btn-primary"
                 style={{ flex: 1 }}
                 disabled={auditing}
-                onClick={handleRunAudit}
+                onClick={() => void handleRunAudit()}
               >
                 <SearchCheck size={14} />
                 <span>{auditing ? 'Đang quét...' : 'Quét lỗi & Gợi ý sửa'}</span>
@@ -387,7 +560,7 @@ export function AiAssistantPanel({
                     : 'Đã xử lý xong các mục lọc hiện tại'}
                 </div>
                 <div style={{ fontSize: 12, color: '#64748b' }}>
-                  Không phát hiện lỗi chính tả, tương phản màu hay bố cục nào. Bấm "Quét lỗi" bất cứ lúc nào sau khi chỉnh sửa thêm.
+                  Không phát hiện lỗi chính tả, tương phản màu hay bố cục nào.
                 </div>
               </div>
             ) : (
@@ -411,21 +584,15 @@ export function AiAssistantPanel({
                       </span>
                     </div>
 
-                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>
-                      {sug.title}
-                    </div>
+                    <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>{sug.title}</div>
                     <p style={{ fontSize: 12, color: '#475569', margin: '0 0 8px', lineHeight: 1.45 }}>
                       {sug.description}
                     </p>
 
                     {(sug.beforePreview || sug.afterPreview) && (
                       <div className="st-diff-box">
-                        {sug.beforePreview && (
-                          <div className="st-diff-before">− {sug.beforePreview}</div>
-                        )}
-                        {sug.afterPreview && (
-                          <div className="st-diff-after">+ {sug.afterPreview}</div>
-                        )}
+                        {sug.beforePreview && <div className="st-diff-before">− {sug.beforePreview}</div>}
+                        {sug.afterPreview && <div className="st-diff-after">+ {sug.afterPreview}</div>}
                       </div>
                     )}
 
@@ -452,7 +619,6 @@ export function AiAssistantPanel({
                           type="button"
                           className="st-btn st-btn-sm st-btn-danger"
                           onClick={() => handleRejectSuggestion(sug)}
-                          title="Từ chối gợi ý này"
                         >
                           <X size={12} />
                           <span>Từ chối</span>
@@ -472,89 +638,20 @@ export function AiAssistantPanel({
           </div>
         )}
 
-        {tab === 'settings' && (
-          <div>
-            <div className="st-group">
-              <div className="st-group-title">Nguồn xử lý AI</div>
-              <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
-                {(
-                  [
-                    ['local', 'AI Cục bộ tích hợp (Mặc định)', 'Miễn phí, xử lý tức thì trên trình duyệt, không cần mạng hay API Key.'],
-                    ['gemini', 'Google Gemini API', 'Tùy chọn dùng khóa Gemini cá nhân để viết lại câu chữ sâu hơn.'],
-                    ['openai', 'OpenAI / Compatible API', 'Kết nối API chuẩn OpenAI để biên tập nội dung nâng cao.'],
-                  ] as const
-                ).map(([mode, title, desc]) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={`st-preset-card ${settings.mode === mode ? 'is-active' : ''}`}
-                    onClick={() => {
-                      const next = {
-                        ...settings,
-                        mode,
-                        model:
-                          mode === 'gemini'
-                            ? 'gemini-2.5-flash'
-                            : mode === 'openai'
-                            ? 'gpt-4o-mini'
-                            : settings.model,
-                      };
-                      setSettings(next);
-                      saveAiSettings(next);
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, fontSize: 13 }}>{title}</div>
-                    <div style={{ fontSize: 11.5, color: '#64748b' }}>{desc}</div>
-                  </button>
-                ))}
-              </div>
-
-              {settings.mode !== 'local' && (
-                <div className="st-subcard">
-                  <div className="st-field">
-                    <label className="st-label">API Key (lưu riêng trên trình duyệt, không xuất ra web khách)</label>
-                    <input
-                      type="password"
-                      className="st-input"
-                      placeholder="Nhập API key..."
-                      value={settings.apiKey}
-                      onChange={(e) => {
-                        const next = { ...settings, apiKey: e.target.value };
-                        setSettings(next);
-                        saveAiSettings(next);
-                      }}
-                    />
-                  </div>
-                  <div className="st-field">
-                    <label className="st-label">Model</label>
-                    <input
-                      type="text"
-                      className="st-input"
-                      value={settings.model}
-                      onChange={(e) => {
-                        const next = { ...settings, model: e.target.value };
-                        setSettings(next);
-                        saveAiSettings(next);
-                      }}
-                    />
-                  </div>
-                  {settings.mode === 'openai' && (
-                    <div className="st-field" style={{ marginBottom: 0 }}>
-                      <label className="st-label">Base URL</label>
-                      <input
-                        type="text"
-                        className="st-input"
-                        value={settings.baseUrl}
-                        onChange={(e) => {
-                          const next = { ...settings, baseUrl: e.target.value };
-                          setSettings(next);
-                          saveAiSettings(next);
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
+        {tab === 'status' && (
+          <div className="st-subcard" style={{ display: 'grid', gap: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5 }}>Quản lý Bảo mật AI phía Server</div>
+            <p style={{ margin: 0, fontSize: 12, color: '#475569', lineHeight: 1.5 }}>
+              API key của AI (<code>GEMINI_API_KEY</code> hoặc <code>OPENAI_API_KEY</code>) được quản lý an toàn trong biến môi trường phía server và không bao giờ lưu ở trình duyệt.
+            </p>
+            <div style={{ fontSize: 12.5 }}>
+              <strong>Trạng thái hiện tại:</strong>{' '}
+              {serverStatus.configured
+                ? `Đã cấu hình ${serverStatus.provider.toUpperCase()} (${serverStatus.model})`
+                : 'Chế độ AI Cục bộ (Server Fallback an toàn)'}
+            </div>
+            <div style={{ fontSize: 11.5, color: '#64748b' }}>
+              Giới hạn bảo vệ: tối đa 30 yêu cầu AI / 10 phút cho mỗi phiên quản trị.
             </div>
           </div>
         )}

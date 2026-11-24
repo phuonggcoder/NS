@@ -10,7 +10,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 COPY package*.json ./
-COPY server.mjs server-api.mjs server-store.mjs server-auth.mjs ./
+COPY server.mjs server-api.mjs server-store.mjs server-auth.mjs server-ai.mjs server-analytics.mjs ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/public ./public
 RUN mkdir -p /app/data

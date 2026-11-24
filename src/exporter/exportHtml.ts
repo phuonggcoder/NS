@@ -229,6 +229,20 @@ function buildStandaloneScript(clientSlug?: string): string {
       }
     });
   });
+
+  try {
+    var payload = JSON.stringify({
+      slug: CLIENT_SLUG,
+      event: 'page_view',
+      path: window.location.pathname,
+      referrer: document.referrer || ''
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon('/api/analytics/track', new Blob([payload], { type: 'application/json' }));
+    } else if (window.fetch) {
+      fetch('/api/analytics/track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(function () {});
+    }
+  } catch (e) {}
 })();
 `;
 }
@@ -239,9 +253,25 @@ export function buildStandaloneHtml(spec: LandingPageSpec, clientSlug?: string):
   );
   const safeTitle = escapeHtml(spec.meta.title || 'Landing Page');
   const safeDescription = escapeHtml(spec.meta.description || '');
+  const safeOgTitle = escapeHtml(spec.meta.ogTitle || spec.meta.title || 'Landing Page');
+  const safeOgDescription = escapeHtml(spec.meta.ogDescription || spec.meta.description || '');
+  const safeOgImage = spec.meta.ogImage && /^https?:\/\//i.test(spec.meta.ogImage) ? escapeHtml(spec.meta.ogImage) : '';
+  const safeCanonical =
+    spec.meta.canonicalUrl && /^https?:\/\//i.test(spec.meta.canonicalUrl)
+      ? escapeHtml(spec.meta.canonicalUrl)
+      : '';
+  const robotsTag = spec.meta.robotsNoIndex
+    ? '<meta name="robots" content="noindex, nofollow" />'
+    : '<meta name="robots" content="index, follow" />';
   const faviconEmoji = escapeHtml(spec.meta.favicon || '✨');
   const safeCustomCss = (spec.meta.customCss || '').replace(/<\/style>/gi, '');
   const safeScript = buildStandaloneScript(clientSlug).replace(/<\/script>/gi, '<\\/script>');
+  const jsonLd = JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: spec.meta.title || 'Landing Page',
+    description: spec.meta.description || '',
+  }).replace(/<\/script>/gi, '<\\/script>');
 
   return `<!doctype html>
 <html lang="vi">
@@ -250,8 +280,17 @@ export function buildStandaloneHtml(spec: LandingPageSpec, clientSlug?: string):
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${safeTitle}</title>
     <meta name="description" content="${safeDescription}" />
-    <meta property="og:title" content="${safeTitle}" />
-    <meta property="og:description" content="${safeDescription}" />
+    ${robotsTag}
+    ${safeCanonical ? `<link rel="canonical" href="${safeCanonical}" />` : ''}
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="${safeOgTitle}" />
+    <meta property="og:description" content="${safeOgDescription}" />
+    ${safeOgImage ? `<meta property="og:image" content="${safeOgImage}" />` : ''}
+    <meta name="twitter:card" content="${safeOgImage ? 'summary_large_image' : 'summary'}" />
+    <meta name="twitter:title" content="${safeOgTitle}" />
+    <meta name="twitter:description" content="${safeOgDescription}" />
+    ${safeOgImage ? `<meta name="twitter:image" content="${safeOgImage}" />` : ''}
+    <script type="application/ld+json">${jsonLd}</script>
     <link
       rel="icon"
       href="data:image/svg+xml,${encodeURIComponent(

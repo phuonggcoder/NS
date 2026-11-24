@@ -29,6 +29,7 @@ import {
 } from '../utils/auth';
 import {
   createClientProject,
+  createClientReviewToken,
   duplicateClientProject,
   loadProjectsState,
   saveProjectsState,
@@ -44,17 +45,21 @@ import {
   saveStoredSpec,
 } from '../utils/storage';
 import { AiAssistantPanel } from './AiAssistantPanel';
+import { AnalyticsDrawer } from './AnalyticsDrawer';
 import { CanvasStage, type CanvasStageHandle } from './CanvasStage';
 import { DesignPanel } from './DesignPanel';
 import { SectionInspector } from './inspector/SectionInspector';
+import { DigitalMenuEditor } from './menu/DigitalMenuEditor';
 import { OrdersDrawer } from './OrdersDrawer';
 import { ProjectsDrawer } from './ProjectsDrawer';
 import { PublishModal } from './PublishModal';
 import { SecurityModal } from './SecurityModal';
+import { SeoPanel } from './SeoPanel';
 import { SpecModal } from './SpecModal';
 import { StructurePanel } from './StructurePanel';
 import { TemplatesSpecPanel } from './TemplatesSpecPanel';
 import { TopBar } from './TopBar';
+import { VersionHistoryDrawer } from './VersionHistoryDrawer';
 import './studio.css';
 
 type LeftTab = 'structure' | 'design' | 'templates';
@@ -107,9 +112,10 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
   const [storageMode, setStorageMode] = useState<StorageMode>(
     authStatus?.storageMode ?? 'browser'
   );
-  const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'offline'>(
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error' | 'offline'>(
     authStatus?.staticFallback ? 'offline' : 'saved'
   );
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const hydratedFromServerRef = useRef(false);
   const syncTimerRef = useRef<number | null>(null);
 
@@ -130,6 +136,10 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [publishOpen, setPublishOpen] = useState(false);
   const [securityOpen, setSecurityOpen] = useState(false);
+  const [menuEditorOpen, setMenuEditorOpen] = useState(false);
+  const [versionsOpen, setVersionsOpen] = useState(false);
+  const [seoOpen, setSeoOpen] = useState(false);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
 
   const [orders, setOrders] = useState<CustomerOrder[]>(() => loadOrders());
   const [leads, setLeads] = useState<ContactLead[]>(() => loadLeads());
@@ -141,11 +151,19 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     message: string;
     linkHref?: string;
     linkLabel?: string;
+    actionLabel?: string;
+    onAction?: () => void;
+    isError?: boolean;
   } | null>(null);
 
   const showToast = useCallback(
-    (message: string, linkHref?: string, linkLabel?: string) => {
-      setToast({ message, linkHref, linkLabel });
+    (
+      message: string,
+      linkHref?: string,
+      linkLabel?: string,
+      extra?: { actionLabel?: string; onAction?: () => void; isError?: boolean }
+    ) => {
+      setToast({ message, linkHref, linkLabel, ...extra });
     },
     []
   );
@@ -228,6 +246,7 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     }
 
     setSyncStatus('saving');
+    setHasUnsavedChanges(true);
     if (syncTimerRef.current !== null) {
       window.clearTimeout(syncTimerRef.current);
     }
@@ -240,7 +259,24 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
           return;
         }
         if (res.storageMode) setStorageMode(res.storageMode);
-        setSyncStatus(res.ok ? 'saved' : 'offline');
+        if (res.ok) {
+          setSyncStatus('saved');
+          setHasUnsavedChanges(false);
+        } else {
+          setSyncStatus('error');
+          showToast(
+            'Lỗi đồng bộ: Chưa lưu được dữ liệu lên server!',
+            undefined,
+            undefined,
+            {
+              isError: true,
+              actionLabel: 'Thử lại ngay',
+              onAction: () => {
+                void flushSyncNow();
+              },
+            }
+          );
+        }
       });
     }, 900);
 
@@ -249,7 +285,24 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         window.clearTimeout(syncTimerRef.current);
       }
     };
-  }, [spec, applyProjectsState, authStatus?.staticFallback, onLoggedOut]);
+  }, [spec, applyProjectsState, authStatus?.staticFallback, onLoggedOut, showToast]);
+
+  // Prevent accidental tab close / reload while saving, offline/error, or dirty
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const isDirtyOrUnsynced =
+        syncStatus === 'saving' ||
+        syncStatus === 'error' ||
+        (syncStatus === 'offline' && !authStatus?.staticFallback) ||
+        hasUnsavedChanges;
+      if (isDirtyOrUnsynced) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [syncStatus, hasUnsavedChanges, authStatus?.staticFallback]);
 
   const flushProjectsToServer = useCallback(
     (projects: ClientProject[], activeId: string) => {
@@ -265,18 +318,23 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
           return;
         }
         if (res.storageMode) setStorageMode(res.storageMode);
-        setSyncStatus(res.ok ? 'saved' : 'offline');
+        if (res.ok) {
+          setSyncStatus('saved');
+          setHasUnsavedChanges(false);
+        } else {
+          setSyncStatus('error');
+        }
       });
     },
     [authStatus?.staticFallback, onLoggedOut]
   );
 
-  const flushSyncNow = useCallback(async () => {
+  const flushSyncNow = useCallback(async (): Promise<boolean> => {
     if (syncTimerRef.current !== null) {
       window.clearTimeout(syncTimerRef.current);
       syncTimerRef.current = null;
     }
-    if (authStatus?.staticFallback) return;
+    if (authStatus?.staticFallback) return false;
     const { projects, activeProjectId } = projectsRef.current;
     const latestProjects = updateSpecInProject(projects, activeProjectId, spec);
     applyProjectsState(latestProjects, activeProjectId);
@@ -285,11 +343,29 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     const res = await saveProjectsToServer(latestProjects, activeProjectId);
     if (res.unauthorized) {
       onLoggedOut?.();
-      return;
+      return false;
     }
     if (res.storageMode) setStorageMode(res.storageMode);
-    setSyncStatus(res.ok ? 'saved' : 'offline');
-  }, [applyProjectsState, authStatus?.staticFallback, onLoggedOut, spec]);
+    if (res.ok) {
+      setSyncStatus('saved');
+      setHasUnsavedChanges(false);
+      return true;
+    }
+    setSyncStatus('error');
+    showToast(
+      'Không thể lưu lên server. Vui lòng kiểm tra kết nối và thử lại.',
+      undefined,
+      undefined,
+      {
+        isError: true,
+        actionLabel: 'Thử lại ngay',
+        onAction: () => {
+          void flushSyncNow();
+        },
+      }
+    );
+    return false;
+  }, [applyProjectsState, authStatus?.staticFallback, onLoggedOut, showToast, spec]);
 
   // Sync orders & leads from localStorage + authenticated server endpoint
   const syncInbox = useCallback(async () => {
@@ -530,8 +606,22 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     commitSpec({ ...spec, sections: nextSections });
   };
 
-  const handleSelectTemplate = (templateId: string) => {
+  const handleSelectTemplate = (templateId: string, preserveBrand = false) => {
     const nextSpec = getTemplateSpec(templateId);
+    if (preserveBrand) {
+      nextSpec.meta = {
+        ...nextSpec.meta,
+        title: spec.meta.title,
+        description: spec.meta.description,
+        ogTitle: spec.meta.ogTitle,
+        ogDescription: spec.meta.ogDescription,
+        ogImage: spec.meta.ogImage,
+        canonicalUrl: spec.meta.canonicalUrl,
+      };
+      if (spec.digitalMenu && !nextSpec.digitalMenu) {
+        nextSpec.digitalMenu = cloneSpec(spec.digitalMenu);
+      }
+    }
     commitSpec(nextSpec);
     setPreviewState(null);
     setActiveFocus(null);
@@ -639,6 +729,11 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         storageMode={storageMode}
         activeFocusTrail={activeFocusTrail}
         onJumpToFocus={handleJumpToFocus}
+        onSaveNow={() => {
+          void flushSyncNow().then((saved) => {
+            if (saved) showToast('Đã lưu toàn bộ thay đổi lên server.');
+          });
+        }}
         onToggleLeftPanel={() => setLeftPanelOpen((prev) => !prev)}
         onToggleRightPanel={() => setRightPanelOpen((prev) => !prev)}
         onToggleAiPanel={() =>
@@ -648,6 +743,10 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
             return next;
           })
         }
+        onOpenDigitalMenu={() => setMenuEditorOpen(true)}
+        onOpenVersions={() => setVersionsOpen(true)}
+        onOpenSeo={() => setSeoOpen(true)}
+        onOpenAnalytics={() => setAnalyticsOpen(true)}
         onOpenProjects={() => setProjectsOpen(true)}
         onOpenOrders={() => {
           void syncInbox();
@@ -724,14 +823,24 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
               {leftTab === 'design' && (
                 <DesignPanel
                   theme={spec.theme}
-                  onChangeTheme={(theme) => commitSpec({ ...spec, theme })}
+                  onChangeTheme={(theme) => {
+                    setPreviewState(null);
+                    commitSpec({ ...spec, theme });
+                  }}
+                  onPreviewTheme={(previewTheme, label) =>
+                    setPreviewState({ spec: { ...spec, theme: previewTheme }, label })
+                  }
                 />
               )}
               {leftTab === 'templates' && (
                 <TemplatesSpecPanel
                   currentTemplateId={spec.templateId}
+                  currentSpec={spec}
                   meta={spec.meta}
                   onSelectTemplate={handleSelectTemplate}
+                  onPreviewTemplate={(previewSpec, label) =>
+                    setPreviewState({ spec: previewSpec, label })
+                  }
                   onUpdateMeta={(meta) => commitSpec({ ...spec, meta })}
                   onImportSpec={(imported) => {
                     commitSpec(imported);
@@ -941,8 +1050,63 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         lastPublishedUrl={lastPublishedUrl}
         onClose={() => setPublishOpen(false)}
         onPublishToServer={handlePublishSite}
+        onRegenerateReviewToken={() => {
+          const nextToken = createClientReviewToken();
+          const current = projectsRef.current;
+          const nextProjects = current.projects.map((p) =>
+            p.id === current.activeProjectId
+              ? { ...p, reviewToken: nextToken, status: 'review' as ProjectStatus, updatedAt: new Date().toISOString() }
+              : p
+          );
+          applyProjectsState(nextProjects, current.activeProjectId);
+          flushProjectsToServer(nextProjects, current.activeProjectId);
+          showToast('Đã tạo lại mã Review Token mới cho khách duyệt.');
+        }}
         onDownloadHtml={handleDownloadHtml}
         onDownloadSpecJson={handleDownloadSpecJson}
+      />
+
+      <DigitalMenuEditor
+        open={menuEditorOpen}
+        slug={activeProject.slug}
+        brandTitle={activeProject.projectName}
+        templateId={spec.templateId}
+        menu={spec.digitalMenu}
+        onChange={(digitalMenu) => commitSpec({ ...spec, digitalMenu })}
+        onClose={() => setMenuEditorOpen(false)}
+      />
+
+      <VersionHistoryDrawer
+        open={versionsOpen}
+        slug={activeProject.slug}
+        currentSpec={spec}
+        onClose={() => setVersionsOpen(false)}
+        onPreviewVersion={(verSpec, label) => setPreviewState({ spec: verSpec, label })}
+        onRestoredSpec={(restoredSpec, label) => {
+          setPreviewState(null);
+          commitSpec(restoredSpec);
+          setAiSuggestions(runLocalAudit(restoredSpec));
+          showToast(`Đã khôi phục phiên bản: ${label}`);
+        }}
+      />
+
+      <SeoPanel
+        open={seoOpen}
+        slug={activeProject.slug}
+        spec={spec}
+        onUpdateMeta={(meta) => commitSpec({ ...spec, meta })}
+        onUpdateMenuSeo={(seo) => {
+          if (!spec.digitalMenu) return;
+          commitSpec({ ...spec, digitalMenu: { ...spec.digitalMenu, seo } });
+        }}
+        onClose={() => setSeoOpen(false)}
+      />
+
+      <AnalyticsDrawer
+        open={analyticsOpen}
+        projects={projectsState.projects}
+        activeSlug={activeProject.slug}
+        onClose={() => setAnalyticsOpen(false)}
       />
 
       <SecurityModal
@@ -954,9 +1118,26 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
       />
 
       {toast && (
-        <div className="st-toast" role="status">
-          <CheckCircle2 size={16} color="#4ade80" />
+        <div
+          className="st-toast"
+          role="status"
+          style={toast.isError ? { background: '#7f1d1d', border: '1px solid #ef4444' } : undefined}
+        >
+          <CheckCircle2 size={16} color={toast.isError ? '#fca5a5' : '#4ade80'} />
           <span>{toast.message}</span>
+          {toast.actionLabel && toast.onAction && (
+            <button
+              type="button"
+              className="st-btn st-btn-sm"
+              style={{ marginLeft: 6, background: '#ffffff', color: '#0f172a' }}
+              onClick={() => {
+                setToast(null);
+                toast.onAction?.();
+              }}
+            >
+              {toast.actionLabel}
+            </button>
+          )}
           {toast.linkHref && (
             <a
               href={toast.linkHref}

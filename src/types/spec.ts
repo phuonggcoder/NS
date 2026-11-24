@@ -271,6 +271,7 @@ export type LandingSection =
 
 export interface ThemeColors {
   primary: string;
+  secondary?: string;
   accent: string;
   background: string;
   surface: string;
@@ -284,6 +285,7 @@ export interface ThemeTypography {
   headingFont: string;
   bodyFont: string;
   scale: 'compact' | 'standard' | 'editorial';
+  fontSize?: 'sm' | 'md' | 'lg';
 }
 
 export interface ThemeShape {
@@ -303,6 +305,13 @@ export interface ThemeConfig {
   motion?: 'none' | 'subtle' | 'smooth';
 }
 
+export interface CustomSavedTheme {
+  id: string;
+  name: string;
+  createdAt: string;
+  theme: ThemeConfig;
+}
+
 export interface FloatingContactConfig {
   enabled: boolean;
   label: string;
@@ -315,6 +324,93 @@ export interface SiteMeta {
   favicon: string;
   floatingContact: FloatingContactConfig;
   customCss?: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  ogImage?: string;
+  canonicalUrl?: string;
+  robotsNoIndex?: boolean;
+}
+
+export interface MenuOptionChoice {
+  id: string;
+  label: string;
+  priceDelta: number;
+  defaultSelected?: boolean;
+}
+
+export interface MenuOptionGroup {
+  id: string;
+  name: string;
+  type: 'single' | 'multiple';
+  required: boolean;
+  minSelect?: number;
+  maxSelect?: number;
+  choices: MenuOptionChoice[];
+}
+
+export interface MenuItem {
+  id: string;
+  categoryId: string;
+  name: string;
+  description: string;
+  imageUrl: string;
+  price: number;
+  salePrice?: number;
+  status: 'available' | 'sold_out';
+  featured?: boolean;
+  bestSeller?: boolean;
+  ingredients?: string;
+  allergens?: string[];
+  optionGroups: MenuOptionGroup[];
+  sortOrder: number;
+}
+
+export interface MenuCategory {
+  id: string;
+  name: string;
+  description?: string;
+  imageUrl?: string;
+  visible: boolean;
+  sortOrder: number;
+}
+
+export interface MenuThemeConfig {
+  layout: 'grid' | 'list';
+  mode: 'light' | 'dark';
+  primaryColor: string;
+  accentColor: string;
+  backgroundColor: string;
+  textColor: string;
+  fontFamily: string;
+  bannerUrl?: string;
+  bannerTitle?: string;
+  bannerSubtitle?: string;
+  showCategoryNav: boolean;
+}
+
+export interface QrTarget {
+  id: string;
+  label: string;
+  branch?: string;
+  table?: string;
+}
+
+export interface DigitalMenuSeo {
+  title?: string;
+  description?: string;
+  ogImage?: string;
+}
+
+export interface DigitalMenuConfig {
+  enabled: boolean;
+  brandName: string;
+  currency: string;
+  description?: string;
+  categories: MenuCategory[];
+  items: MenuItem[];
+  theme: MenuThemeConfig;
+  qrTargets?: QrTarget[];
+  seo?: DigitalMenuSeo;
 }
 
 export interface LandingPageSpec {
@@ -324,12 +420,15 @@ export interface LandingPageSpec {
   meta: SiteMeta;
   theme: ThemeConfig;
   sections: LandingSection[];
+  digitalMenu?: DigitalMenuConfig;
 }
 
 export interface CustomerOrder {
   id: string;
   createdAt: string;
   clientSlug?: string;
+  branch?: string;
+  table?: string;
   productId: string;
   productName: string;
   unitPrice: string;
@@ -351,7 +450,7 @@ export interface ContactLead {
   message: string;
 }
 
-export type ProjectStatus = 'draft' | 'review' | 'approved' | 'published';
+export type ProjectStatus = 'draft' | 'review' | 'approved' | 'rejected' | 'published';
 
 export interface ClientFeedbackItem {
   id: string;
@@ -360,7 +459,7 @@ export interface ClientFeedbackItem {
   author: string;
   sectionLabel: string;
   comment: string;
-  type: 'feedback' | 'approved';
+  type: 'feedback' | 'approved' | 'rejected';
   resolved: boolean;
 }
 
@@ -373,6 +472,17 @@ export interface ClientProject {
   notes: string;
   updatedAt: string;
   publishedUrl?: string;
+  reviewToken?: string;
+  spec: LandingPageSpec;
+}
+
+export interface VersionRecord {
+  id: string;
+  slug: string;
+  createdAt: string;
+  actor: string;
+  label: string;
+  scope: 'landing' | 'menu' | 'both';
   spec: LandingPageSpec;
 }
 

@@ -1,7 +1,11 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { handleApiRequest, handlePublishedAssetRequest } from './server-api.mjs';
+import {
+  handleApiRequest,
+  handlePublishedAssetRequest,
+  handleSeoDiscoveryRequest,
+} from './server-api.mjs';
 import { applySecurityHeaders } from './server-auth.mjs';
 import { getPublicDir, getStorageMode, resolveSafeChild } from './server-store.mjs';
 
@@ -73,6 +77,10 @@ async function sendFile(res, req, filePath, isAsset) {
 
 const server = http.createServer(async (req, res) => {
   if (await handleApiRequest(req, res, { rootDir: ROOT_DIR })) {
+    return;
+  }
+
+  if (await handleSeoDiscoveryRequest(req, res, ROOT_DIR)) {
     return;
   }
 

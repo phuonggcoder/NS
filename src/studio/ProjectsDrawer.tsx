@@ -233,11 +233,13 @@ export function ProjectsDrawer({
                       )}
 
                       <a
-                        href={`/?mode=review&slug=${encodeURIComponent(proj.slug)}`}
+                        href={`/?mode=review&slug=${encodeURIComponent(proj.slug)}${
+                          proj.reviewToken ? `&token=${encodeURIComponent(proj.reviewToken)}` : ''
+                        }`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="st-btn st-btn-sm"
-                        title="Mở link cho khách xem & duyệt mẫu"
+                        title="Mở link có Token bảo mật cho khách xem & duyệt mẫu"
                       >
                         <ExternalLink size={12} />
                         <span>Duyệt mẫu</span>
@@ -282,15 +284,19 @@ export function ProjectsDrawer({
               ) : (
                 feedback.map((fb) => (
                   <div key={fb.id} className="st-subcard">
-                    <div className="st-subcard-head">
-                      <span>
-                        {fb.type === 'approved' ? '✅ KHÁCH ĐÃ DUYỆT MẪU' : `💬 ${fb.sectionLabel}`} —{' '}
-                        {fb.author}
-                      </span>
-                      <span style={{ fontSize: 11, color: '#64748b' }}>
-                        {new Date(fb.createdAt).toLocaleString('vi-VN')}
-                      </span>
-                    </div>
+                      <div className="st-subcard-head">
+                        <span>
+                          {fb.type === 'approved'
+                            ? '✅ KHÁCH ĐÃ DUYỆT MẪU'
+                            : fb.type === 'rejected'
+                              ? '❌ KHÁCH YÊU CẦU SỬA (TỪ CHỐI)'
+                              : `💬 ${fb.sectionLabel}`}{' '}
+                          — {fb.author}
+                        </span>
+                        <span style={{ fontSize: 11, color: '#64748b' }}>
+                          {new Date(fb.createdAt).toLocaleString('vi-VN')}
+                        </span>
+                      </div>
                     <div style={{ fontSize: 12.5, color: '#334155' }}>{fb.comment}</div>
                   </div>
                 ))

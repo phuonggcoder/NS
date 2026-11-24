@@ -11,11 +11,31 @@ import type {
 
 export type AiProviderMode = 'local' | 'gemini' | 'openai';
 
-export interface AiProviderSettings {
-  mode: AiProviderMode;
-  apiKey: string;
-  baseUrl: string;
+export type AiCopyTask =
+  | 'website_copy'
+  | 'product_desc'
+  | 'menu_item_desc'
+  | 'headlines'
+  | 'ad_copy'
+  | 'normalize'
+  | 'translate'
+  | 'spellcheck'
+  | 'seo_suggestions';
+
+export interface AiServerStatus {
+  configured: boolean;
+  provider: AiProviderMode;
   model: string;
+}
+
+export interface AiCopyResult {
+  ok: boolean;
+  providerUsed: AiProviderMode;
+  modelUsed: string;
+  text: string;
+  alternatives?: string[];
+  notes?: string[];
+  warning?: string;
 }
 
 export type AutoFillBlockKey =

@@ -8,10 +8,13 @@
     "check": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test": "node --test tests/**/*.test.mjs",
     "start": "node server.mjs"
   },
   "dependencies": {
+    "@types/qrcode": "^1.5.6",
     "lucide-react": "^1.0.0",
+    "qrcode": "^1.5.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

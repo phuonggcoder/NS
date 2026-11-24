@@ -94,10 +94,56 @@ function hashScrypt(password, salt) {
   return crypto.scryptSync(password, salt, 64).toString('hex');
 }
 
-function safeEqualStrings(a, b) {
+export function safeEqualStrings(a, b) {
   const bufA = crypto.createHash('sha256').update(String(a)).digest();
   const bufB = crypto.createHash('sha256').update(String(b)).digest();
   return crypto.timingSafeEqual(bufA, bufB);
+}
+
+export function generateReviewToken() {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+export function verifySameOrigin(req) {
+  const method = (req?.method || 'GET').toUpperCase();
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    return true;
+  }
+
+  const expectedHost = (
+    req?.headers?.['x-forwarded-host'] ||
+    req?.headers?.host ||
+    ''
+  )
+    .toString()
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+
+  if (!expectedHost) return true;
+
+  const origin = req?.headers?.origin;
+  if (typeof origin === 'string' && origin.trim()) {
+    if (origin === 'null') return false;
+    try {
+      const parsed = new URL(origin);
+      return parsed.host.toLowerCase() === expectedHost;
+    } catch {
+      return false;
+    }
+  }
+
+  const referer = req?.headers?.referer;
+  if (typeof referer === 'string' && referer.trim()) {
+    try {
+      const parsed = new URL(referer);
+      return parsed.host.toLowerCase() === expectedHost;
+    } catch {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export async function getAuthState(rootDir = process.cwd()) {

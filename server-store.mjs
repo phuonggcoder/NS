@@ -1,5 +1,36 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+
+export const KV_KEYS = {
+  PROJECTS: 'projects',
+  CUSTOM_THEMES: 'themes:custom',
+  ORDERS: 'orders',
+  FEEDBACK: 'feedback',
+  SITES_INDEX: 'sites_index',
+};
+
+export function getVersionsKey(projectIdOrSlug) {
+  const cleaned = String(projectIdOrSlug || 'default')
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]/g, '-')
+    .slice(0, 80);
+  return `versions:${cleaned || 'default'}`;
+}
+
+export function getAnalyticsDayKey(slug, dateStr = new Date().toISOString().slice(0, 10)) {
+  const safeSlug = sanitizeSlug(slug) || 'du-an-mau';
+  const safeDate = /^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ''))
+    ? String(dateStr)
+    : new Date().toISOString().slice(0, 10);
+  return `analytics:${safeSlug}:${safeDate}`;
+}
+
+function constantTimeMatch(a, b) {
+  const hashA = crypto.createHash('sha256').update(String(a)).digest();
+  const hashB = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(hashA, hashB);
+}
 
 export function sanitizeSlug(raw) {
   if (typeof raw !== 'string') return null;
@@ -75,37 +106,74 @@ function supabaseHeaders(extra = {}) {
   };
 }
 
-export async function storeGet(key, fallback = null, rootDir = process.cwd()) {
+export async function storeGetStrict(key, rootDir = process.cwd()) {
   const mode = getStorageMode();
   const namespacedKey = `specpage:${key}`;
 
+  if (mode === 'upstash') {
+    const data = await upstashCommand(['GET', namespacedKey]);
+    if (data && typeof data.result === 'string') {
+      return { found: true, value: JSON.parse(data.result) };
+    }
+    return { found: false, value: null };
+  }
+
+  if (mode === 'supabase') {
+    const base = process.env.SUPABASE_URL.replace(/\/$/, '');
+    const url = `${base}/rest/v1/specpage_kv?key=eq.${encodeURIComponent(namespacedKey)}&select=value`;
+    const res = await fetch(url, { headers: supabaseHeaders() });
+    if (!res.ok) {
+      throw new Error(`Supabase HTTP ${res.status}`);
+    }
+    const rows = await res.json();
+    if (Array.isArray(rows) && rows.length > 0 && rows[0].value !== undefined) {
+      return { found: true, value: rows[0].value };
+    }
+    return { found: false, value: null };
+  }
+
+  const filePath = keyToLocalPath(key, rootDir);
   try {
-    if (mode === 'upstash') {
-      const data = await upstashCommand(['GET', namespacedKey]);
-      if (data && typeof data.result === 'string') {
-        return JSON.parse(data.result);
-      }
-      return fallback;
-    }
-
-    if (mode === 'supabase') {
-      const base = process.env.SUPABASE_URL.replace(/\/$/, '');
-      const url = `${base}/rest/v1/specpage_kv?key=eq.${encodeURIComponent(namespacedKey)}&select=value`;
-      const res = await fetch(url, { headers: supabaseHeaders() });
-      if (!res.ok) return fallback;
-      const rows = await res.json();
-      if (Array.isArray(rows) && rows.length > 0 && rows[0].value !== undefined) {
-        return rows[0].value;
-      }
-      return fallback;
-    }
-
-    const filePath = keyToLocalPath(key, rootDir);
     const raw = await fs.promises.readFile(filePath, 'utf8');
-    return JSON.parse(raw);
+    return { found: true, value: JSON.parse(raw) };
+  } catch (err) {
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'ENOENT') {
+      return { found: false, value: null };
+    }
+    throw err;
+  }
+}
+
+export async function storeGet(key, fallback = null, rootDir = process.cwd()) {
+  try {
+    const res = await storeGetStrict(key, rootDir);
+    return res.found ? res.value : fallback;
   } catch {
     return fallback;
   }
+}
+
+export async function backupStoreSnapshot(label = 'auto', rootDir = process.cwd()) {
+  const safeLabel = String(label || 'auto').replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 32);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupKey = `backup:${stamp}-${safeLabel}`;
+  const [projects, sitesIndex, feedback, orders] = await Promise.all([
+    storeGet('projects', null, rootDir),
+    storeGet('sites_index', null, rootDir),
+    storeGet('feedback', null, rootDir),
+    storeGet('orders', null, rootDir),
+  ]);
+  const snapshot = {
+    createdAt: new Date().toISOString(),
+    label: safeLabel,
+    storageMode: getStorageMode(),
+    projects,
+    sitesIndex,
+    feedback,
+    orders,
+  };
+  await storeSet(backupKey, snapshot, rootDir);
+  return { backupKey, createdAt: snapshot.createdAt };
 }
 
 export async function storeSet(key, value, rootDir = process.cwd()) {
@@ -298,32 +366,73 @@ export async function listPublishedSites(rootDir = process.cwd()) {
   return Array.from(bySlug.values());
 }
 
-export async function getPublicSiteSpec(slug = null, rootDir = process.cwd()) {
+export async function getPublicSiteSpec(slug = null, rootDir = process.cwd(), options = {}) {
   const safeSlug = slug ? sanitizeSlug(slug) : null;
-  const projectsData = await storeGet('projects', null, rootDir);
+  const mode = options.mode === 'review' ? 'review' : 'live';
+  const isAdmin = Boolean(options.isAdmin);
+  const reviewToken = typeof options.reviewToken === 'string' ? options.reviewToken.trim() : '';
 
-  if (projectsData && Array.isArray(projectsData.projects) && projectsData.projects.length > 0) {
-    const match = safeSlug
-      ? projectsData.projects.find((p) => p && p.slug === safeSlug)
-      : projectsData.projects.find((p) => p && p.id === projectsData.activeProjectId) ||
-        projectsData.projects[0];
+  if (mode === 'review' || options.allowDraft) {
+    const projectsData = await storeGet('projects', null, rootDir);
+    if (projectsData && Array.isArray(projectsData.projects) && projectsData.projects.length > 0) {
+      const match = safeSlug
+        ? projectsData.projects.find((p) => p && p.slug === safeSlug)
+        : projectsData.projects.find((p) => p && p.id === projectsData.activeProjectId) ||
+          projectsData.projects[0];
 
-    if (match && match.spec && Array.isArray(match.spec.sections)) {
-      return {
-        slug: match.slug || safeSlug || 'du-an-mau',
-        projectName: match.projectName || match.spec.meta?.title || 'Landing Page',
-        spec: match.spec,
-      };
+      if (match && match.spec && Array.isArray(match.spec.sections)) {
+        if (mode === 'review' && !isAdmin && match.reviewToken) {
+          if (!reviewToken || !constantTimeMatch(reviewToken, match.reviewToken)) {
+            return {
+              unauthorized: true,
+              reason: 'Link xem trước yêu cầu mã xác thực (reviewToken) hợp lệ.',
+            };
+          }
+        }
+        return {
+          slug: match.slug || safeSlug || 'du-an-mau',
+          projectName: match.projectName || match.spec.meta?.title || 'Landing Page',
+          clientName: match.clientName || '',
+          publishedUrl: match.publishedUrl || null,
+          spec: match.spec,
+          isDraft: true,
+          status: match.status || 'draft',
+        };
+      }
     }
   }
 
+  // In mode=live, strictly serve published snapshots first so drafts never leak publicly
   const published = await getPublishedSite(safeSlug, rootDir);
   if (published && published.spec && Array.isArray(published.spec.sections)) {
     return {
       slug: safeSlug || published.slug || 'du-an-mau',
       projectName: published.spec.meta?.title || safeSlug || 'Landing Page',
       spec: published.spec,
+      isDraft: false,
+      status: 'published',
     };
+  }
+
+  // Only allow draft fallback in live mode if explicitly requested (e.g., admin previewing before first publish)
+  if (options.allowDraftFallback === true) {
+    const projectsData = await storeGet('projects', null, rootDir);
+    if (projectsData && Array.isArray(projectsData.projects) && projectsData.projects.length > 0) {
+      const match = safeSlug
+        ? projectsData.projects.find((p) => p && p.slug === safeSlug)
+        : projectsData.projects.find((p) => p && p.id === projectsData.activeProjectId) ||
+          projectsData.projects[0];
+
+      if (match && match.spec && Array.isArray(match.spec.sections)) {
+        return {
+          slug: match.slug || safeSlug || 'du-an-mau',
+          projectName: match.projectName || match.spec.meta?.title || 'Landing Page',
+          spec: match.spec,
+          isDraft: true,
+          status: match.status || 'draft',
+        };
+      }
+    }
   }
 
   return null;

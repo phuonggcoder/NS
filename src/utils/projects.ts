@@ -18,8 +18,18 @@ export const PROJECT_STATUS_META: Record<
   draft: { label: 'Bản nháp', color: '#475569', bg: '#E2E8F0' },
   review: { label: 'Chờ khách duyệt', color: '#B45309', bg: '#FEF3C7' },
   approved: { label: 'Khách đã duyệt', color: '#15803D', bg: '#DCFCE7' },
+  rejected: { label: 'Cần chỉnh sửa', color: '#B91C1C', bg: '#FEE2E2' },
   published: { label: 'Đã xuất bản', color: '#1D4ED8', bg: '#DBEAFE' },
 };
+
+export function createClientReviewToken(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+  }
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+}
 
 export function slugifyVietnamese(input: string): string {
   const normalized = input
@@ -108,6 +118,7 @@ export function createClientProject(
     status: 'draft',
     notes: params.notes?.trim() || '',
     updatedAt: new Date().toISOString(),
+    reviewToken: createClientReviewToken(),
     spec,
   };
 }
@@ -126,6 +137,7 @@ export function duplicateClientProject(
     status: 'draft',
     updatedAt: new Date().toISOString(),
     publishedUrl: undefined,
+    reviewToken: createClientReviewToken(),
   };
 }
 
@@ -148,16 +160,28 @@ export function saveLocalFeedback(item: ClientFeedbackItem): ClientFeedbackItem[
   return next;
 }
 
-export async function submitFeedbackToServer(item: ClientFeedbackItem): Promise<void> {
+export async function submitFeedbackToServer(
+  item: ClientFeedbackItem,
+  reviewToken?: string
+): Promise<{ ok: boolean; status?: ProjectStatus; error?: string }> {
   saveLocalFeedback(item);
   try {
-    await fetch('/api/feedback', {
+    const res = await fetch('/api/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(item),
+      body: JSON.stringify({ ...item, reviewToken }),
     });
+    const data = (await res.json()) as {
+      ok?: boolean;
+      status?: ProjectStatus;
+      error?: string;
+    };
+    if (!res.ok) {
+      return { ok: false, error: data.error || 'Không thể gửi phản hồi.' };
+    }
+    return { ok: true, status: data.status };
   } catch {
-    // Works gracefully offline/static via localStorage
+    return { ok: true };
   }
 }
 

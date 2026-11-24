@@ -1,7 +1,11 @@
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 // @ts-expect-error Shared ESM API module for dev & production server
-import { handleApiRequest, handlePublishedAssetRequest } from './server-api.mjs';
+import {
+  handleApiRequest,
+  handlePublishedAssetRequest,
+  handleSeoDiscoveryRequest,
+} from './server-api.mjs';
 
 function specPageApiPlugin(): Plugin {
   const middleware = (
@@ -11,6 +15,7 @@ function specPageApiPlugin(): Plugin {
   ) => {
     void (async () => {
       if (await handleApiRequest(req, res)) return;
+      if (await handleSeoDiscoveryRequest(req, res)) return;
       if (await handlePublishedAssetRequest(req, res)) return;
       next();
     })();

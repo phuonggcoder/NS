@@ -1,20 +1,33 @@
-import { AlertTriangle, CheckCircle2, Sparkles } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertTriangle, BookmarkPlus, CheckCircle2, Eye, Sparkles, Trash2 } from 'lucide-react';
 import { FONT_OPTIONS, THEME_PRESETS } from '../data/themes';
-import type { ThemeConfig } from '../types/spec';
+import type { CustomSavedTheme, ThemeConfig } from '../types/spec';
 import {
   auditThemeContrast,
   autoFixThemeContrast,
   derivePaletteForMode,
 } from '../utils/contrast';
+import {
+  createCustomThemeRecord,
+  fetchCustomThemes,
+  persistCustomThemes,
+} from '../utils/customThemes';
 import { cloneSpec } from '../utils/storage';
 
 interface DesignPanelProps {
   theme: ThemeConfig;
   onChangeTheme: (next: ThemeConfig) => void;
+  onPreviewTheme?: (preview: ThemeConfig, label: string) => void;
 }
 
-export function DesignPanel({ theme, onChangeTheme }: DesignPanelProps) {
+export function DesignPanel({ theme, onChangeTheme, onPreviewTheme }: DesignPanelProps) {
   const contrastAudit = auditThemeContrast(theme);
+  const [savedThemes, setSavedThemes] = useState<CustomSavedTheme[]>([]);
+  const [newThemeName, setNewThemeName] = useState('');
+
+  useEffect(() => {
+    void fetchCustomThemes().then(setSavedThemes);
+  }, []);
 
   const updateColor = (key: keyof ThemeConfig['colors'], value: string) => {
     onChangeTheme({
@@ -35,19 +48,114 @@ export function DesignPanel({ theme, onChangeTheme }: DesignPanelProps) {
     });
   };
 
+  const handleSaveCustomTheme = async () => {
+    if (!newThemeName.trim()) return;
+    const record = createCustomThemeRecord(newThemeName, theme);
+    const next = [record, ...savedThemes].slice(0, 30);
+    setSavedThemes(next);
+    setNewThemeName('');
+    await persistCustomThemes(next);
+  };
+
+  const handleDeleteCustomTheme = async (id: string) => {
+    const next = savedThemes.filter((t) => t.id !== id);
+    setSavedThemes(next);
+    await persistCustomThemes(next);
+  };
+
   return (
     <div>
+      <div className="st-group">
+        <div className="st-group-title">Theme đã lưu của bạn ({savedThemes.length})</div>
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          <input
+            type="text"
+            className="st-input"
+            placeholder="Đặt tên theme hiện tại..."
+            value={newThemeName}
+            onChange={(e) => setNewThemeName(e.target.value)}
+          />
+          <button
+            type="button"
+            className="st-btn st-btn-sm st-btn-primary"
+            disabled={!newThemeName.trim()}
+            onClick={() => void handleSaveCustomTheme()}
+            title="Lưu cấu hình theme hiện tại"
+          >
+            <BookmarkPlus size={13} />
+            <span>Lưu</span>
+          </button>
+        </div>
+
+        {savedThemes.length > 0 && (
+          <div style={{ display: 'grid', gap: 7, marginBottom: 12 }}>
+            {savedThemes.map((item) => (
+              <div key={item.id} className="st-subcard" style={{ padding: 9 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <span
+                      className="st-swatch"
+                      style={{ background: item.theme.colors.primary, width: 12, height: 12 }}
+                    />
+                    <span
+                      style={{
+                        fontWeight: 700,
+                        fontSize: 12.5,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {item.name}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {onPreviewTheme && (
+                      <button
+                        type="button"
+                        className="st-btn st-btn-sm"
+                        style={{ padding: '3px 7px', fontSize: 11 }}
+                        onClick={() => onPreviewTheme(cloneSpec(item.theme), `Xem thử theme: ${item.name}`)}
+                      >
+                        <Eye size={11} />
+                        <span>Thử</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="st-btn st-btn-sm st-btn-primary"
+                      style={{ padding: '3px 8px', fontSize: 11 }}
+                      onClick={() => onChangeTheme(cloneSpec(item.theme))}
+                    >
+                      Áp dụng
+                    </button>
+                    <button
+                      type="button"
+                      className="st-btn st-btn-icon"
+                      style={{ padding: 4 }}
+                      onClick={() => void handleDeleteCustomTheme(item.id)}
+                      title="Xóa theme"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="st-group">
         <div className="st-group-title">Bảng màu & Phong cách có sẵn ({THEME_PRESETS.length})</div>
         <div className="st-preset-grid">
           {THEME_PRESETS.map((preset) => {
             const isActive = theme.presetId === preset.id;
             return (
-              <button
+              <div
                 key={preset.id}
-                type="button"
                 className={`st-preset-card ${isActive ? 'is-active' : ''}`}
-                onClick={() => onChangeTheme(cloneSpec(preset.theme))}
+                style={{ display: 'grid', gap: 6 }}
               >
                 <div className="st-swatches">
                   <span className="st-swatch" style={{ background: preset.theme.colors.background }} />
@@ -65,11 +173,33 @@ export function DesignPanel({ theme, onChangeTheme }: DesignPanelProps) {
                     {preset.theme.mode === 'dark' ? 'DARK' : 'LIGHT'}
                   </span>
                 </div>
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>{preset.name}</div>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{preset.name}</div>
                 <div style={{ fontSize: 11.5, color: '#64748b', lineHeight: 1.4 }}>
                   {preset.description}
                 </div>
-              </button>
+                <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                  {onPreviewTheme && (
+                    <button
+                      type="button"
+                      className="st-btn st-btn-sm"
+                      onClick={() =>
+                        onPreviewTheme(cloneSpec(preset.theme), `Xem thử theme: ${preset.name}`)
+                      }
+                    >
+                      <Eye size={12} />
+                      <span>Xem thử</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="st-btn st-btn-sm st-btn-primary"
+                    style={{ flex: 1 }}
+                    onClick={() => onChangeTheme(cloneSpec(preset.theme))}
+                  >
+                    Áp dụng
+                  </button>
+                </div>
+              </div>
             );
           })}
         </div>
@@ -93,9 +223,7 @@ export function DesignPanel({ theme, onChangeTheme }: DesignPanelProps) {
           </div>
         </div>
 
-        <div
-          className={`st-contrast-box ${contrastAudit.allPassed ? 'is-pass' : 'is-warn'}`}
-        >
+        <div className={`st-contrast-box ${contrastAudit.allPassed ? 'is-pass' : 'is-warn'}`}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 12 }}>
             {contrastAudit.allPassed ? (
               <>
@@ -134,6 +262,7 @@ export function DesignPanel({ theme, onChangeTheme }: DesignPanelProps) {
           {(
             [
               ['primary', 'Màu chính'],
+              ['secondary', 'Màu phụ (Secondary)'],
               ['accent', 'Màu nhấn'],
               ['background', 'Nền trang'],
               ['surface', 'Nền thẻ'],
@@ -142,21 +271,27 @@ export function DesignPanel({ theme, onChangeTheme }: DesignPanelProps) {
               ['muted', 'Chữ phụ'],
               ['border', 'Đường viền'],
             ] as const
-          ).map(([key, label]) => (
-            <div key={key}>
-              <span className="st-label">{label}</span>
-              <div className="st-color-box">
-                <input
-                  type="color"
-                  value={theme.colors[key]}
-                  onChange={(e) => updateColor(key, e.target.value)}
-                />
-                <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#475569' }}>
-                  {theme.colors[key]}
-                </span>
+          ).map(([key, label]) => {
+            const val =
+              key === 'secondary'
+                ? theme.colors.secondary || theme.colors.accent
+                : theme.colors[key];
+            return (
+              <div key={key}>
+                <span className="st-label">{label}</span>
+                <div className="st-color-box">
+                  <input
+                    type="color"
+                    value={val}
+                    onChange={(e) => updateColor(key, e.target.value)}
+                  />
+                  <span style={{ fontSize: 11, fontFamily: 'monospace', color: '#475569' }}>
+                    {val}
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -203,7 +338,36 @@ export function DesignPanel({ theme, onChangeTheme }: DesignPanelProps) {
         </div>
 
         <div className="st-field">
-          <label className="st-label">Tỷ lệ cỡ chữ</label>
+          <label className="st-label">Cỡ chữ nền (Font Size)</label>
+          <div className="st-pill-selector">
+            {(
+              [
+                ['sm', 'Nhỏ'],
+                ['md', 'Chuẩn'],
+                ['lg', 'Lớn'],
+              ] as const
+            ).map(([val, label]) => (
+              <button
+                key={val}
+                type="button"
+                className={`st-pill-opt ${
+                  (theme.typography.fontSize ?? 'md') === val ? 'is-active' : ''
+                }`}
+                onClick={() =>
+                  onChangeTheme({
+                    ...theme,
+                    typography: { ...theme.typography, fontSize: val },
+                  })
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="st-field">
+          <label className="st-label">Tỷ lệ tiêu đề</label>
           <div className="st-pill-selector">
             {(
               [

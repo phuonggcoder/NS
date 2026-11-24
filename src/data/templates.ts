@@ -1,4 +1,5 @@
 import type { LandingPageSpec, LandingSection, SectionType } from '../types/spec';
+import { INDUSTRY_TEMPLATES } from './industryTemplates';
 import { PLACEHOLDER_ART } from './placeholders';
 import { getPresetById } from './themes';
 import { cloneSpec, generateId } from '../utils/storage';
@@ -988,10 +989,24 @@ const speckitTechSpec: LandingPageSpec = {
 };
 
 export const STARTER_TEMPLATES: StarterTemplateMeta[] = [
+  ...INDUSTRY_TEMPLATES.map(({ id, name, tag, description, spec }) => ({
+    id,
+    name,
+    tag,
+    description,
+    spec,
+  })),
+  {
+    id: 'personal-portfolio',
+    name: 'Portfolio Cá Nhân & Tư vấn',
+    tag: 'Portfolio',
+    description: 'Phong cách Dark Luxury dành cho chuyên gia, freelancer và dịch vụ 1-1.',
+    spec: personalPortfolioSpec,
+  },
   {
     id: 'creator-store',
     name: 'Cá nhân & Bán sản phẩm',
-    tag: 'Phổ biến nhất',
+    tag: 'Phổ biến',
     description: 'Kết hợp giới thiệu bản thân chuyên nghiệp + bán sản phẩm số / dịch vụ.',
     spec: creatorStoreSpec,
   },
@@ -1001,13 +1016,6 @@ export const STARTER_TEMPLATES: StarterTemplateMeta[] = [
     tag: 'Thương mại',
     description: 'Tập trung trưng bày sản phẩm, ưu đãi combo, đánh giá và chốt đơn nhanh.',
     spec: productFlagshipSpec,
-  },
-  {
-    id: 'personal-portfolio',
-    name: 'Portfolio & Tư vấn (Dark)',
-    tag: 'Cá nhân',
-    description: 'Phong cách Dark Luxury dành cho chuyên gia, freelancer và dịch vụ 1-1.',
-    spec: personalPortfolioSpec,
   },
   {
     id: 'speckit-tech',

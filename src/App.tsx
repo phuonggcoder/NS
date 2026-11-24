@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 import { getTemplateSpec } from './data/templates';
 import { LandingPage } from './renderer/LandingPage';
+import { DigitalMenuPage } from './renderer/menu/DigitalMenuPage';
 import { AuthGate } from './studio/AuthGate';
 import { ClientReviewBar } from './studio/ClientReviewBar';
 import { StudioApp } from './studio/StudioApp';
-import type { LandingPageSpec } from './types/spec';
+import type {
+  ClientFeedbackItem,
+  DigitalMenuConfig,
+  LandingPageSpec,
+  ProjectStatus,
+} from './types/spec';
+import { trackAnalyticsEvent } from './utils/analytics';
 import { readLocalSpecReadOnly } from './utils/projects';
 import { saveLead, saveOrder } from './utils/storage';
 
@@ -15,25 +22,143 @@ function isValidSpec(candidate: unknown): candidate is LandingPageSpec {
 }
 
 export function App() {
+  const pathname = window.location.pathname;
   const params = new URLSearchParams(window.location.search);
+  const menuPathMatch = pathname.match(/^\/menu\/([a-z0-9-]+)\/?$/i);
   const mode = params.get('mode');
-  const isLiveMode = mode === 'live';
-  const isReviewMode = mode === 'review';
+  const isMenuMode = Boolean(menuPathMatch) || mode === 'menu';
+  const isLiveMode = !isMenuMode && mode === 'live';
+  const isReviewMode = !isMenuMode && mode === 'review';
   const fromStudio = params.get('from') === 'studio';
-  const slugParam = params.get('slug');
+  const slugParam = menuPathMatch?.[1] || params.get('slug');
+  const reviewTokenParam = params.get('token') || '';
+  const branchParam = params.get('branch') || undefined;
+  const tableParam = params.get('table') || undefined;
+  const isQrVisit = params.get('qr') === '1' || Boolean(branchParam || tableParam);
 
   const [liveSpec, setLiveSpec] = useState<LandingPageSpec>(
     () => readLocalSpecReadOnly(slugParam) ?? getTemplateSpec('creator-store')
   );
-  const [loadingSpec, setLoadingSpec] = useState<boolean>(isLiveMode || isReviewMode);
+  const [menuData, setMenuData] = useState<DigitalMenuConfig | null>(null);
+  const [menuError, setMenuError] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewMeta, setReviewMeta] = useState<{
+    status: ProjectStatus;
+    feedbackHistory: ClientFeedbackItem[];
+    projectTitle: string;
+  }>({ status: 'review', feedbackHistory: [], projectTitle: 'Mẫu Landing Page' });
+
+  const [loadingSpec, setLoadingSpec] = useState<boolean>(
+    isLiveMode || isReviewMode || isMenuMode
+  );
   const [reviewViewport, setReviewViewport] = useState<'desktop' | 'mobile'>('desktop');
+
+  useEffect(() => {
+    if (!isMenuMode) return;
+    let cancelled = false;
+    const resolvedSlug = slugParam || 'du-an-mau';
+
+    async function loadMenu() {
+      try {
+        const res = await fetch(
+          `/api/public/menu?slug=${encodeURIComponent(resolvedSlug)}`,
+          { cache: 'no-store' }
+        );
+        const data = (await res.json()) as {
+          ok?: boolean;
+          menu?: DigitalMenuConfig;
+          error?: string;
+        };
+        if (!cancelled && res.ok && data.ok && data.menu) {
+          setMenuData(data.menu);
+          document.title = data.menu.seo?.title || `${data.menu.brandName} — Thực đơn điện tử`;
+          setLoadingSpec(false);
+          trackAnalyticsEvent({
+            slug: resolvedSlug,
+            event: isQrVisit ? 'qr_visit' : 'menu_view',
+          });
+          return;
+        }
+        if (!cancelled && res.status === 404) {
+          const local = readLocalSpecReadOnly(slugParam);
+          if (local?.digitalMenu?.enabled) {
+            setMenuData(local.digitalMenu);
+            setLoadingSpec(false);
+            return;
+          }
+          setMenuError(data.error || 'Thực đơn điện tử chưa được kích hoạt.');
+          setLoadingSpec(false);
+          return;
+        }
+      } catch {
+        const local = readLocalSpecReadOnly(slugParam);
+        if (!cancelled && local?.digitalMenu?.enabled) {
+          setMenuData(local.digitalMenu);
+          setLoadingSpec(false);
+          return;
+        }
+        if (!cancelled) {
+          setMenuError('Không thể tải thực đơn. Vui lòng thử lại.');
+          setLoadingSpec(false);
+        }
+      }
+    }
+
+    void loadMenu();
+    return () => {
+      cancelled = true;
+    };
+  }, [isMenuMode, slugParam, isQrVisit]);
 
   useEffect(() => {
     if (!isLiveMode && !isReviewMode) return;
     let cancelled = false;
 
     async function loadServerFirstSpec() {
-      // 1. Always ask backend persistent store first so every browser sees identical live data
+      if (isReviewMode) {
+        const targetSlug = slugParam || 'du-an-mau';
+        try {
+          const res = await fetch(
+            `/api/public/review?slug=${encodeURIComponent(targetSlug)}&token=${encodeURIComponent(
+              reviewTokenParam
+            )}`,
+            { cache: 'no-store', credentials: 'same-origin' }
+          );
+          const ct = res.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const data = (await res.json()) as {
+              ok?: boolean;
+              spec?: unknown;
+              status?: ProjectStatus;
+              feedbackHistory?: ClientFeedbackItem[];
+              projectName?: string;
+              error?: string;
+            };
+            if (!cancelled && res.ok && data.ok && isValidSpec(data.spec)) {
+              setLiveSpec(data.spec);
+              setReviewMeta({
+                status: data.status || 'review',
+                feedbackHistory: Array.isArray(data.feedbackHistory) ? data.feedbackHistory : [],
+                projectTitle:
+                  data.projectName || data.spec.meta.title.split('—')[0]?.trim() || 'Mẫu Landing Page',
+              });
+              setLoadingSpec(false);
+              return;
+            }
+            if (!cancelled && res.status === 403) {
+              setReviewError(
+                data.error || 'Link xem trước bản nháp yêu cầu mã bảo mật (review token) hợp lệ.'
+              );
+              setLoadingSpec(false);
+              return;
+            }
+          }
+        } catch {
+          // Fall through to local read-only if offline static
+        }
+      }
+
+      // Public Live mode
       const publicApiUrl = slugParam
         ? `/api/public/site?slug=${encodeURIComponent(slugParam)}`
         : '/api/public/site';
@@ -42,10 +167,16 @@ export function App() {
         const res = await fetch(publicApiUrl, { cache: 'no-store' });
         const ct = res.headers.get('content-type') || '';
         if (res.ok && ct.includes('application/json')) {
-          const data = (await res.json()) as { ok?: boolean; spec?: unknown };
+          const data = (await res.json()) as { ok?: boolean; slug?: string; spec?: unknown };
           if (!cancelled && data.ok && isValidSpec(data.spec)) {
             setLiveSpec(data.spec);
             setLoadingSpec(false);
+            if (isLiveMode) {
+              trackAnalyticsEvent({
+                slug: data.slug || slugParam || 'du-an-mau',
+                event: 'page_view',
+              });
+            }
             return;
           }
         }
@@ -53,7 +184,6 @@ export function App() {
         // Try static spec fallback next
       }
 
-      // 2. Fallback to static published spec JSON
       const staticSpecUrl = slugParam
         ? `/clients/${encodeURIComponent(slugParam)}/spec.json`
         : '/published-spec.json';
@@ -70,10 +200,9 @@ export function App() {
           }
         }
       } catch {
-        // Fall through to read-only localStorage or default starter
+        // Fall through to read-only localStorage
       }
 
-      // 3. Fallback to read-only localStorage (only if already saved on this browser)
       if (!cancelled) {
         const local = readLocalSpecReadOnly(slugParam);
         if (local) setLiveSpec(local);
@@ -85,7 +214,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [isLiveMode, isReviewMode, slugParam]);
+  }, [isLiveMode, isReviewMode, slugParam, reviewTokenParam]);
 
   useEffect(() => {
     if (!isLiveMode && !isReviewMode) return;
@@ -102,6 +231,65 @@ export function App() {
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
   }, [isLiveMode, isReviewMode, slugParam, liveSpec.meta.title, liveSpec.meta.description]);
+
+  if (isMenuMode) {
+    if (loadingSpec) {
+      return (
+        <div
+          style={{
+            minHeight: '100vh',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontFamily: "'Be Vietnam Pro', sans-serif",
+            color: '#475569',
+          }}
+        >
+          Đang tải thực đơn điện tử...
+        </div>
+      );
+    }
+
+    if (menuError || !menuData) {
+      return (
+        <div
+          style={{
+            minHeight: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+            textAlign: 'center',
+            fontFamily: "'Be Vietnam Pro', sans-serif",
+          }}
+        >
+          <h2 style={{ margin: '0 0 8px' }}>Không thể mở Digital Menu</h2>
+          <p style={{ color: '#64748b', margin: 0 }}>
+            {menuError || 'Thực đơn chưa được kích hoạt.'}
+          </p>
+        </div>
+      );
+    }
+
+    const resolvedSlug = slugParam || 'du-an-mau';
+    return (
+      <DigitalMenuPage
+        menu={menuData}
+        clientSlug={resolvedSlug}
+        branch={branchParam}
+        table={tableParam}
+        onItemOpened={(item) =>
+          trackAnalyticsEvent({
+            slug: resolvedSlug,
+            event: 'menu_item_view',
+            itemId: item.id,
+            itemName: item.name,
+          })
+        }
+      />
+    );
+  }
 
   if (isLiveMode || isReviewMode) {
     if (loadingSpec) {
@@ -120,6 +308,27 @@ export function App() {
           }}
         >
           Đang đồng bộ phiên bản mới nhất...
+        </div>
+      );
+    }
+
+    if (isReviewMode && reviewError) {
+      return (
+        <div
+          style={{
+            minHeight: '100vh',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 24,
+            textAlign: 'center',
+            background: '#f8fafc',
+            fontFamily: "'Be Vietnam Pro', sans-serif",
+          }}
+        >
+          <h2 style={{ margin: '0 0 8px', color: '#0f172a' }}>Không thể mở bản xem trước</h2>
+          <p style={{ color: '#64748b', maxWidth: 440, margin: 0 }}>{reviewError}</p>
         </div>
       );
     }
@@ -180,7 +389,10 @@ export function App() {
         {isReviewMode && (
           <ClientReviewBar
             clientSlug={slugParam || 'du-an-mau'}
-            projectTitle={liveSpec.meta.title.split('—')[0]?.trim() || 'Mẫu Landing Page'}
+            reviewToken={reviewTokenParam || undefined}
+            projectTitle={reviewMeta.projectTitle}
+            projectStatus={reviewMeta.status}
+            feedbackHistory={reviewMeta.feedbackHistory}
             sections={liveSpec.sections}
             viewport={reviewViewport}
             onChangeViewport={setReviewViewport}
