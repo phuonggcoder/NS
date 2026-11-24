@@ -4,13 +4,27 @@ import {
 } from './server-ai-memory.mjs';
 
 const AI_TIMEOUT_MS = 15000;
+const GEMINI_MODEL_FALLBACKS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-2.5-flash-lite',
+  'gemini-1.5-flash',
+];
+const workingGeminiModelCache = new Map();
+
+function normalizeGeminiModelName(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/^models\//i, '');
+}
 
 export function getAiConfigFromEnv() {
   const geminiKey = (process.env.GEMINI_API_KEY || '').trim();
   const openaiKey = (process.env.OPENAI_API_KEY || '').trim();
   const openaiBase = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').trim();
   const geminiBase = (process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com').trim();
-  const preferredModel = (process.env.AI_MODEL || '').trim();
+  const preferredModel = normalizeGeminiModelName(process.env.AI_MODEL || '');
 
   if (geminiKey) {
     return {
@@ -48,12 +62,11 @@ function stripJsonFences(raw) {
   return match ? match[1].trim() : trimmed;
 }
 
-async function callGemini(config, systemPrompt, userPrompt) {
-  const model = config.model || 'gemini-2.5-flash';
-  const base = (config.geminiBaseUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
+async function invokeGeminiGenerate(base, apiKey, model, systemPrompt, userPrompt) {
+  const cleanModel = normalizeGeminiModelName(model);
   const url = `${base}/v1beta/models/${encodeURIComponent(
-    model
-  )}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
+    cleanModel
+  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
@@ -77,15 +90,93 @@ async function callGemini(config, systemPrompt, userPrompt) {
         },
       }),
     });
+
     if (!res.ok) {
-      throw new Error(`Gemini HTTP ${res.status}`);
+      let detail = '';
+      try {
+        const errJson = await res.json();
+        detail = errJson?.error?.message ? `: ${String(errJson.error.message).slice(0, 140)}` : '';
+      } catch {
+        // Ignore non-JSON error body
+      }
+      const err = new Error(`Gemini HTTP ${res.status} (${cleanModel})${detail}`);
+      err.status = res.status;
+      throw err;
     }
+
     const json = await res.json();
     const text = json?.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-    return JSON.parse(stripJsonFences(text));
+    return { parsed: JSON.parse(stripJsonFences(text)), modelUsed: cleanModel };
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function discoverGeminiGenerateModel(base, apiKey) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(`${base}/v1beta/models?key=${encodeURIComponent(apiKey)}`, {
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const models = Array.isArray(data?.models) ? data.models : [];
+    const supported = models.filter(
+      (m) =>
+        Array.isArray(m?.supportedGenerationMethods) &&
+        m.supportedGenerationMethods.includes('generateContent') &&
+        typeof m?.name === 'string' &&
+        m.name.includes('gemini') &&
+        !/embedding|vision-only|aqa/i.test(m.name)
+    );
+    const preferred =
+      supported.find((m) => /flash/i.test(m.name)) ||
+      supported.find((m) => /pro/i.test(m.name)) ||
+      supported[0];
+    return preferred ? normalizeGeminiModelName(preferred.name) : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function callGemini(config, systemPrompt, userPrompt) {
+  const base = (config.geminiBaseUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
+  const cacheKey = `${base}|${config.apiKey.slice(-6)}|${config.model || ''}`;
+  const cached = workingGeminiModelCache.get(cacheKey);
+
+  const candidates = Array.from(
+    new Set(
+      [cached, normalizeGeminiModelName(config.model), ...GEMINI_MODEL_FALLBACKS].filter(Boolean)
+    )
+  );
+
+  let lastErr = null;
+  for (const model of candidates) {
+    try {
+      const result = await invokeGeminiGenerate(base, config.apiKey, model, systemPrompt, userPrompt);
+      workingGeminiModelCache.set(cacheKey, result.modelUsed);
+      return result.parsed;
+    } catch (err) {
+      lastErr = err;
+      if (err && typeof err === 'object' && 'status' in err && err.status === 404) {
+        continue;
+      }
+      throw err;
+    }
+  }
+
+  // All static model names returned 404: discover an available model via ListModels
+  const discovered = await discoverGeminiGenerateModel(base, config.apiKey);
+  if (discovered && !candidates.includes(discovered)) {
+    const result = await invokeGeminiGenerate(base, config.apiKey, discovered, systemPrompt, userPrompt);
+    workingGeminiModelCache.set(cacheKey, result.modelUsed);
+    return result.parsed;
+  }
+
+  throw lastErr || new Error('Gemini HTTP 404: Không tìm thấy model khả dụng.');
 }
 
 async function callOpenAiCompatible(config, systemPrompt, userPrompt) {

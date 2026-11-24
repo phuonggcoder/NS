@@ -332,4 +332,80 @@ describe('Context-Aware Gemini AI, Long-Term Brand Memory & Self-Learning Feedba
       await new Promise((resolve) => mockGemini.close(resolve));
     }
   });
+
+  it('recovers automatically from Gemini HTTP 404 by falling back / discovering an available model via ListModels', async () => {
+    const requestedUrls = [];
+    const mockGemini404 = http.createServer((req, res) => {
+      requestedUrls.push(`${req.method} ${req.url.split('?')[0]}`);
+      if (req.method === 'GET' && req.url.startsWith('/v1beta/models')) {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(
+          JSON.stringify({
+            models: [
+              {
+                name: 'models/gemini-2.5-pro-preview',
+                supportedGenerationMethods: ['generateContent'],
+              },
+            ],
+          })
+        );
+        return;
+      }
+
+      if (req.url.includes('gemini-2.5-pro-preview:generateContent')) {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [{ text: JSON.stringify({ text: 'Mô tả từ model được tự động khám phá!' }) }],
+                },
+              },
+            ],
+          })
+        );
+        return;
+      }
+
+      res.statusCode = 404;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ error: { message: 'Model not found' } }));
+    });
+
+    await new Promise((resolve) => mockGemini404.listen(0, '127.0.0.1', resolve));
+    const gAddr = mockGemini404.address();
+    const prevKey = process.env.GEMINI_API_KEY;
+    const prevBase = process.env.GEMINI_API_BASE_URL;
+    const prevModel = process.env.AI_MODEL;
+    process.env.GEMINI_API_KEY = 'gemini-404-recovery-key';
+    process.env.GEMINI_API_BASE_URL = `http://127.0.0.1:${gAddr.port}`;
+    process.env.AI_MODEL = 'models/gemini-1.0-pro-legacy';
+
+    try {
+      const res = await fetch(`${baseUrl}/api/ai/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: adminCookie },
+        body: JSON.stringify({
+          task: 'menu_item_desc',
+          projectId: 'proj_moc_01',
+          slug: 'moc-coffee',
+          input: 'Cà phê sữa đá',
+        }),
+      });
+      assert.equal(res.status, 200);
+      const data = await res.json();
+      assert.equal(data.providerUsed, 'gemini');
+      assert.equal(data.text, 'Mô tả từ model được tự động khám phá!');
+      assert.ok(requestedUrls.some((u) => u === 'GET /v1beta/models'));
+    } finally {
+      if (prevKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = prevKey;
+      if (prevBase === undefined) delete process.env.GEMINI_API_BASE_URL;
+      else process.env.GEMINI_API_BASE_URL = prevBase;
+      if (prevModel === undefined) delete process.env.AI_MODEL;
+      else process.env.AI_MODEL = prevModel;
+      await new Promise((resolve) => mockGemini404.close(resolve));
+    }
+  });
 });
