@@ -1,9 +1,15 @@
+import {
+  buildServerProjectContext,
+  clampRuleWords,
+} from './server-ai-memory.mjs';
+
 const AI_TIMEOUT_MS = 15000;
 
 export function getAiConfigFromEnv() {
   const geminiKey = (process.env.GEMINI_API_KEY || '').trim();
   const openaiKey = (process.env.OPENAI_API_KEY || '').trim();
   const openaiBase = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').trim();
+  const geminiBase = (process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com').trim();
   const preferredModel = (process.env.AI_MODEL || '').trim();
 
   if (geminiKey) {
@@ -13,6 +19,7 @@ export function getAiConfigFromEnv() {
       model: preferredModel || 'gemini-2.5-flash',
       apiKey: geminiKey,
       baseUrl: openaiBase,
+      geminiBaseUrl: geminiBase,
     };
   }
   if (openaiKey) {
@@ -22,6 +29,7 @@ export function getAiConfigFromEnv() {
       model: preferredModel || 'gpt-4o-mini',
       apiKey: openaiKey,
       baseUrl: openaiBase,
+      geminiBaseUrl: geminiBase,
     };
   }
   return {
@@ -30,6 +38,7 @@ export function getAiConfigFromEnv() {
     model: 'specpage-local-vi-v2',
     apiKey: '',
     baseUrl: openaiBase,
+    geminiBaseUrl: geminiBase,
   };
 }
 
@@ -41,7 +50,8 @@ function stripJsonFences(raw) {
 
 async function callGemini(config, systemPrompt, userPrompt) {
   const model = config.model || 'gemini-2.5-flash';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+  const base = (config.geminiBaseUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
+  const url = `${base}/v1beta/models/${encodeURIComponent(
     model
   )}:generateContent?key=${encodeURIComponent(config.apiKey)}`;
 
@@ -53,8 +63,18 @@ async function callGemini(config, systemPrompt, userPrompt) {
       signal: controller.signal,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: `${systemPrompt}\n\n${userPrompt}` }] }],
-        generationConfig: { responseMimeType: 'application/json' },
+        systemInstruction: {
+          parts: [{ text: systemPrompt }],
+        },
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: userPrompt }],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: 'application/json',
+        },
       }),
     });
     if (!res.ok) {
@@ -100,6 +120,13 @@ async function callOpenAiCompatible(config, systemPrompt, userPrompt) {
   }
 }
 
+async function callConfiguredProvider(config, systemPrompt, userPrompt) {
+  if (config.provider === 'gemini') {
+    return callGemini(config, systemPrompt, userPrompt);
+  }
+  return callOpenAiCompatible(config, systemPrompt, userPrompt);
+}
+
 const VIETNAMESE_SPELL_FIXES = [
   [/\bsan pham\b/gi, 'sản phẩm'],
   [/\bchat luong\b/gi, 'chất lượng'],
@@ -125,9 +152,140 @@ function normalizeSpacesAndPunctuation(text) {
     .trim();
 }
 
-function buildLocalFallback(task, input, context = {}) {
+function buildHolisticAuditFallback(projectCtx) {
+  const spec = projectCtx?.spec || {};
+  const meta = spec.meta || {};
+  const sections = Array.isArray(spec.sections) ? spec.sections : [];
+  const hero = sections.find((s) => s && s.type === 'hero' && s.visible);
+  const cta = sections.find((s) => s && s.type === 'cta' && s.visible);
+  const dm = spec.digitalMenu;
+  const analytics = projectCtx?.analytics;
+  const memory = projectCtx?.memory;
+
+  const brandName =
+    dm?.brandName ||
+    String(meta.title || 'Thương hiệu').split('—')[0]?.trim() ||
+    'Thương hiệu của bạn';
+  const toneNote = memory?.brandProfile?.tone ? ` (${memory.brandProfile.tone})` : '';
+
+  const recs = [];
+
+  if (hero) {
+    const currentHl = String(hero.headline || '').trim();
+    if (currentHl.length < 18 || currentHl.length > 75) {
+      recs.push({
+        id: 'rec-hero-headline',
+        priority: 'high',
+        category: 'conversion',
+        title: 'Tối ưu tiêu đề chính Hero rõ giá trị ngay 5 giây đầu',
+        reason: 'Tiêu đề Hero hiện tại chưa nêu bật lợi ích cụ thể hoặc độ dài chưa tối ưu.',
+        targetSectionType: 'hero',
+        targetField: 'headline',
+        currentValue: currentHl,
+        suggestedValue: `${brandName} — Chất lượng khác biệt, trải nghiệm xứng tầm`,
+      });
+    }
+    if (!hero.imageCaption || String(hero.imageCaption).trim().length < 8) {
+      recs.push({
+        id: 'rec-hero-alt',
+        priority: 'medium',
+        category: 'seo',
+        title: 'Bổ sung mô tả ảnh (Alt Text) cho khối Hero',
+        reason: 'Giúp Google hiểu nội dung hình ảnh và tăng khả năng tiếp cận (Accessibility).',
+        targetSectionType: 'hero',
+        targetField: 'imageCaption',
+        currentValue: String(hero.imageCaption || ''),
+        suggestedValue: `Hình ảnh giới thiệu sản phẩm và dịch vụ nổi bật của ${brandName}`,
+      });
+    }
+  }
+
+  const descLen = String(meta.description || '').trim().length;
+  if (descLen < 50 || descLen > 160) {
+    recs.push({
+      id: 'rec-meta-desc',
+      priority: 'high',
+      category: 'seo',
+      title: 'Chuẩn hóa Meta Description (50–160 ký tự) tăng CTR Google',
+      reason: `Meta Description hiện dài ${descLen} ký tự. Độ dài chuẩn giúp hiển thị trọn vẹn trên kết quả tìm kiếm.`,
+      targetSectionType: 'meta',
+      targetField: 'description',
+      currentValue: String(meta.description || ''),
+      suggestedValue: `Khám phá ${brandName}${toneNote}: thông tin minh bạch, bảng giá & thực đơn mới nhất, đặt lịch hoặc đặt món nhanh chóng chỉ với 1 chạm.`,
+    });
+  }
+
+  if (cta && (!cta.primaryLabel || String(cta.primaryLabel).length < 6)) {
+    recs.push({
+      id: 'rec-cta-label',
+      priority: 'medium',
+      category: 'conversion',
+      title: 'Làm rõ nút hành động CTA cuối trang',
+      reason: 'Nút CTA mang tính hành động cụ thể giúp tăng tỷ lệ bấm chốt đơn hoặc đặt lịch.',
+      targetSectionType: 'cta',
+      targetField: 'primaryLabel',
+      currentValue: String(cta.primaryLabel || ''),
+      suggestedValue: 'Đặt lịch / Nhận tư vấn ngay',
+    });
+  }
+
+  if (dm && dm.enabled && Array.isArray(dm.items)) {
+    const shortItem = dm.items.find((it) => !it.description || it.description.trim().length < 20);
+    if (shortItem) {
+      recs.push({
+        id: `rec-menu-${shortItem.id}`,
+        priority: 'medium',
+        category: 'menu',
+        title: `Làm hấp dẫn mô tả món "${shortItem.name}"`,
+        reason: 'Mô tả món ăn chi tiết nguyên liệu và hương vị giúp khách gọi món QR nhanh hơn.',
+        targetSectionType: 'menu_item',
+        targetField: shortItem.id,
+        currentValue: String(shortItem.description || ''),
+        suggestedValue: `${shortItem.name} chế biến tươi mới mỗi ngày từ nguyên liệu chọn lọc, hương vị cân bằng dễ thưởng thức.`,
+      });
+    }
+  }
+
+  if (recs.length < 3 && hero) {
+    recs.push({
+      id: 'rec-hero-sub',
+      priority: 'medium',
+      category: 'copy',
+      title: 'Củng cố đoạn mô tả phụ (Subheadline) theo USP thương hiệu',
+      reason:
+        analytics && analytics.totals.pageViews > 0
+          ? `Trang đang có ${analytics.totals.pageViews} lượt xem (${analytics.totals.qrVisits} lượt QR); làm rõ USP ngay đầu trang sẽ cải thiện chuyển đổi.`
+          : 'Nêu rõ điểm khác biệt (USP) và lời hứa dịch vụ ngay dưới tiêu đề chính.',
+      targetSectionType: 'hero',
+      targetField: 'subheadline',
+      currentValue: String(hero.subheadline || ''),
+      suggestedValue:
+        memory?.brandProfile?.usp ||
+        `${brandName} cam kết chất lượng chuẩn xác, minh bạch chi phí và phục vụ tận tâm ngay từ lần trải nghiệm đầu tiên.`,
+    });
+  }
+
+  const top5 = recs.slice(0, 5);
+  return {
+    summary: `Đã phân tích tổng thể trang${dm?.enabled ? ' + Digital Menu' : ''} và ${
+      memory?.learnedRules?.length || 0
+    } quy tắc ghi nhớ thương hiệu. Đề xuất ${top5.length} cải tiến ưu tiên nhất:`,
+    recommendations: top5,
+  };
+}
+
+function buildLocalFallback(task, input, context = {}, projectCtx = null) {
+  if (task === 'holistic_audit') {
+    return buildHolisticAuditFallback(projectCtx);
+  }
+
   const clean = normalizeSpacesAndPunctuation(input);
-  const brand = String(context.brandName || context.projectName || 'Thương hiệu của bạn').trim();
+  const brand = String(
+    context.brandName ||
+      context.projectName ||
+      projectCtx?.spec?.meta?.title?.split('—')[0] ||
+      'Thương hiệu của bạn'
+  ).trim();
   const targetLang = String(context.targetLanguage || 'English').trim();
 
   switch (task) {
@@ -209,7 +367,7 @@ function buildLocalFallback(task, input, context = {}) {
     case 'translate': {
       return {
         text: clean,
-        warning: `Chưa cấu hình GEMINI_API_KEY hoặc OPENAI_API_KEY trên server để dịch tự động sang ${targetLang}. Đã giữ nguyên nội dung gốc để bạn chỉnh sửa thủ công hoặc cấu hình AI key trong biến môi trường server.`,
+        warning: `Chưa cấu hình GEMINI_API_KEY hoặc OPENAI_API_KEY trên server để dịch tự động sang ${targetLang}. Đã giữ nguyên nội dung gốc để bạn chỉnh sửa thủ công.`,
       };
     }
 
@@ -228,14 +386,22 @@ function buildLocalFallback(task, input, context = {}) {
   }
 }
 
-export async function generateAiContent(payload) {
+export async function generateAiContent(payload, options = {}) {
   const task = String(payload?.task || 'website_copy');
   const input = String(payload?.input || '').slice(0, 6000);
   const context = payload?.context && typeof payload.context === 'object' ? payload.context : {};
+  const rootDir = options.rootDir || process.cwd();
   const config = getAiConfigFromEnv();
 
+  const projectCtx = await buildServerProjectContext({
+    projectId: payload?.projectId || context.projectId,
+    slug: payload?.slug || context.slug,
+    spec: payload?.spec,
+    rootDir,
+  }).catch(() => null);
+
   if (!config.configured) {
-    const local = buildLocalFallback(task, input, context);
+    const local = buildLocalFallback(task, input, context, projectCtx);
     return {
       ok: true,
       providerUsed: 'local',
@@ -245,16 +411,29 @@ export async function generateAiContent(payload) {
   }
 
   const targetLang = String(context.targetLanguage || 'English');
-  const brandName = String(context.brandName || context.projectName || '');
-  const systemPrompt = [
-    'Bạn là trợ lý biên tập nội dung thương mại & SEO tiếng Việt chuyên nghiệp cho SpecPage Studio.',
-    'Luôn trả về JSON hợp lệ với cấu trúc: {"text": "...", "alternatives": ["..."], "notes": ["..."]}.',
-    'Không bịa đặt thông số kỹ thuật hay giá cả không có trong ngữ cảnh. Giữ giọng văn tự nhiên, chuẩn chính tả tiếng Việt.',
-  ].join(' ');
+  const brandName = String(
+    context.brandName ||
+      context.projectName ||
+      projectCtx?.spec?.meta?.title?.split('—')[0] ||
+      ''
+  );
+
+  const systemInstruction = [
+    'Bạn là Giám đốc Sáng tạo, Kiến trúc sư CRO & Chuyên gia SEO tiếng Việt của SpecPage Studio.',
+    'Luôn tuân thủ tuyệt đối [LONG-TERM BRAND MEMORY] (tông giọng, đối tượng, USP, từ cấm và các learnedRules) cùng [PROJECT CONTEXT] dưới đây.',
+    projectCtx?.systemContextBlock || '',
+    task === 'holistic_audit'
+      ? 'Trả về JSON hợp lệ: {"summary": "...", "recommendations": [{"id": "...", "priority": "high|medium|low", "category": "seo|conversion|copy|menu|design", "title": "...", "reason": "...", "targetSectionType": "hero|meta|cta|products|menu_item", "targetField": "headline|subheadline|description|title|primaryLabel|<menuItemId>", "currentValue": "...", "suggestedValue": "..."}]} gồm tối đa 5 đề xuất giá trị cao nhất.'
+      : 'Luôn trả về JSON hợp lệ với cấu trúc: {"text": "...", "alternatives": ["..."], "notes": ["..."]}. Không bịa thông số kỹ thuật hay giá cả không có trong ngữ cảnh.',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   const taskInstructions = {
+    holistic_audit:
+      'Đọc toàn bộ LandingPageSpec, DigitalMenu, lỗi SEO và chỉ số Analytics trong systemInstruction. Đề xuất top 5 cải thiện cụ thể có thể Apply 1 chạm.',
     autofill: 'Tóm tắt & trích xuất nội dung chuyên nghiệp cho landing page.',
-    website_copy: 'Viết nội dung giới thiệu website mạch lạc, giàu sức thuyết phục.',
+    website_copy: 'Viết nội dung giới thiệu website mạch lạc, đúng tông giọng thương hiệu.',
     product_desc: 'Viết mô tả sản phẩm súc tích, nêu rõ lợi ích và kêu gọi hành động.',
     menu_item_desc: 'Viết mô tả món ăn / đồ uống hấp dẫn, gợi hương vị và nguyên liệu.',
     headlines: 'Gợi ý 5 tiêu đề ngắn gọn, thu hút chuyển đổi.',
@@ -274,10 +453,34 @@ export async function generateAiContent(payload) {
   });
 
   try {
-    const remote =
-      config.provider === 'gemini'
-        ? await callGemini(config, systemPrompt, userPrompt)
-        : await callOpenAiCompatible(config, systemPrompt, userPrompt);
+    const remote = await callConfiguredProvider(config, systemInstruction, userPrompt);
+
+    if (task === 'holistic_audit') {
+      const recs = Array.isArray(remote?.recommendations) ? remote.recommendations.slice(0, 5) : [];
+      if (recs.length === 0) {
+        throw new Error('AI không trả về danh sách đề xuất hợp lệ');
+      }
+      return {
+        ok: true,
+        providerUsed: config.provider,
+        modelUsed: config.model,
+        summary:
+          typeof remote.summary === 'string' && remote.summary.trim()
+            ? remote.summary.trim()
+            : `AI (${config.provider}) đã phân tích toàn trang và đề xuất ${recs.length} cải tiến.`,
+        recommendations: recs.map((r, idx) => ({
+          id: String(r?.id || `ai-rec-${idx + 1}`),
+          priority: r?.priority === 'high' || r?.priority === 'low' ? r.priority : 'medium',
+          category: String(r?.category || 'conversion'),
+          title: String(r?.title || 'Gợi ý tối ưu'),
+          reason: String(r?.reason || ''),
+          targetSectionType: String(r?.targetSectionType || 'hero'),
+          targetField: String(r?.targetField || 'subheadline'),
+          currentValue: String(r?.currentValue || ''),
+          suggestedValue: String(r?.suggestedValue || ''),
+        })),
+      };
+    }
 
     const text = typeof remote?.text === 'string' && remote.text.trim() ? remote.text.trim() : null;
     if (!text) {
@@ -292,7 +495,7 @@ export async function generateAiContent(payload) {
       notes: Array.isArray(remote.notes) ? remote.notes.slice(0, 8) : [],
     };
   } catch (err) {
-    const local = buildLocalFallback(task, input, context);
+    const local = buildLocalFallback(task, input, context, projectCtx);
     return {
       ok: true,
       providerUsed: 'local',
@@ -303,4 +506,76 @@ export async function generateAiContent(payload) {
       }), đã chuyển sang chế độ cục bộ an toàn.`,
     };
   }
+}
+
+function buildLocalRuleHeuristic({ taskType, aiOutput, userFinalOutput, action, note }) {
+  if (note && String(note).trim()) {
+    return clampRuleWords(String(note).trim(), 20);
+  }
+  const aiText = String(aiOutput || '').trim();
+  const userText = String(userFinalOutput || '').trim();
+
+  if (action === 'rejected') {
+    if (taskType === 'headlines') return 'Tránh viết tiêu đề quá dài hoặc chung chung không nêu lợi ích.';
+    if (taskType === 'menu_item_desc') return 'Mô tả món cần ngắn gọn, thực tế, tránh từ ngữ sáo rỗng.';
+    return `Người dùng từ chối gợi ý kiểu "${taskType}", cần sát thực tế thương hiệu hơn.`;
+  }
+
+  if (action === 'edited' && userText) {
+    if (userText.length < aiText.length * 0.75) {
+      return 'Ưu tiên câu chữ ngắn gọn, súc tích hơn so với bản AI gốc.';
+    }
+    if (/[!]/.test(userText) && !/[!]/.test(aiText)) {
+      return 'Giữ giọng văn năng lượng, thân thiện và có điểm nhấn kêu gọi hành động.';
+    }
+    if (/\d/.test(userText) && !/\d/.test(aiText)) {
+      return 'Luôn kèm con số, giá hoặc định lượng cụ thể trong nội dung.';
+    }
+    return 'Điều chỉnh câu chữ tự nhiên, sát văn phong riêng của chủ thương hiệu.';
+  }
+
+  return '';
+}
+
+export async function extractLearnedRuleFromFeedback({
+  taskType,
+  aiOutput,
+  userFinalOutput,
+  action,
+  note,
+  memory,
+}) {
+  if (action !== 'edited' && action !== 'rejected') {
+    return '';
+  }
+
+  const config = getAiConfigFromEnv();
+  if (!config.configured) {
+    return buildLocalRuleHeuristic({ taskType, aiOutput, userFinalOutput, action, note });
+  }
+
+  const systemPrompt = [
+    'Bạn là hệ thống học sở thích biên tập nội dung tiếng Việt.',
+    'Hãy rút ra ĐÚNG 1 quy tắc ngắn gọn dưới 20 từ về gu nội dung của người dùng từ sự khác biệt giữa aiOutput và userFinalOutput (hoặc lý do từ chối).',
+    'Trả về JSON: {"rule": "..."}. Quy tắc phải chung áp dụng cho các lần sau, không lặp lại các quy tắc đã có.',
+  ].join(' ');
+
+  const userPrompt = JSON.stringify({
+    taskType,
+    action,
+    aiOutput: String(aiOutput || '').slice(0, 800),
+    userFinalOutput: String(userFinalOutput || '').slice(0, 800),
+    note: String(note || '').slice(0, 240),
+    existingRules: memory?.learnedRules || [],
+  });
+
+  try {
+    const res = await callConfiguredProvider(config, systemPrompt, userPrompt);
+    const distilled = clampRuleWords(res?.rule || '', 20);
+    if (distilled) return distilled;
+  } catch {
+    // Fall back to deterministic rule extraction
+  }
+
+  return buildLocalRuleHeuristic({ taskType, aiOutput, userFinalOutput, action, note });
 }

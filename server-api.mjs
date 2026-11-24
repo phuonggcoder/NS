@@ -1,4 +1,10 @@
-import { generateAiContent, getAiConfigFromEnv } from './server-ai.mjs';
+import { extractLearnedRuleFromFeedback, generateAiContent, getAiConfigFromEnv } from './server-ai.mjs';
+import {
+  appendLearnedRule,
+  appendOptimizationLog,
+  getProjectAiMemory,
+  saveProjectAiMemory,
+} from './server-ai-memory.mjs';
 import { queryAnalytics, trackAnalyticsEvent } from './server-analytics.mjs';
 import {
   applySecurityHeaders,
@@ -676,9 +682,78 @@ export async function handleApiRequest(req, res, options = {}) {
     if (pathname === '/api/ai/generate' && req.method === 'POST') {
       if (!(await requireAdmin(req, res, rootDir))) return true;
       if (!enforceRateLimit(req, res, 'ai-api', 30, 10 * 60 * 1000)) return true;
-      const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
-      const result = await generateAiContent(body);
+      const body = await readJsonBody(req, MAX_ADMIN_BODY_BYTES);
+      const result = await generateAiContent(body, { rootDir });
       sendJson(res, 200, result);
+      return true;
+    }
+
+    if (pathname === '/api/ai/memory') {
+      if (!(await requireAdmin(req, res, rootDir))) return true;
+
+      if (req.method === 'GET') {
+        const projectId = urlObj.searchParams.get('projectId') || 'default';
+        const memory = await getProjectAiMemory(projectId, rootDir);
+        sendJson(res, 200, { ok: true, projectId, memory });
+        return true;
+      }
+
+      if (req.method === 'PUT') {
+        const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
+        const projectId = String(body?.projectId || 'default');
+        const memory = await saveProjectAiMemory(
+          projectId,
+          {
+            brandProfile: body?.brandProfile,
+            learnedRules: body?.learnedRules,
+            optimizationLog: body?.optimizationLog,
+          },
+          rootDir
+        );
+        sendJson(res, 200, { ok: true, projectId, memory });
+        return true;
+      }
+    }
+
+    if (pathname === '/api/ai/feedback' && req.method === 'POST') {
+      if (!(await requireAdmin(req, res, rootDir))) return true;
+      if (!enforceRateLimit(req, res, 'ai-api', 60, 10 * 60 * 1000)) return true;
+
+      const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
+      const projectId = String(body?.projectId || 'default');
+      const taskType = String(body?.taskType || 'website_copy');
+      const action =
+        body?.action === 'edited' || body?.action === 'rejected' ? body.action : 'accepted';
+      const topic = String(body?.topic || taskType).slice(0, 120);
+
+      let memory = await appendOptimizationLog(
+        projectId,
+        {
+          topic,
+          status: action,
+          note: body?.note || (action === 'accepted' ? 'Người dùng áp dụng trực tiếp' : ''),
+        },
+        rootDir
+      );
+
+      let learnedRule = '';
+      if (action === 'edited' || action === 'rejected') {
+        learnedRule = await extractLearnedRuleFromFeedback({
+          taskType,
+          aiOutput: body?.aiOutput || '',
+          userFinalOutput: body?.userFinalOutput || '',
+          action,
+          note: body?.note || '',
+          memory,
+        });
+        if (learnedRule) {
+          const updated = await appendLearnedRule(projectId, learnedRule, rootDir);
+          memory = updated.memory;
+          learnedRule = updated.rule;
+        }
+      }
+
+      sendJson(res, 200, { ok: true, projectId, action, learnedRule, memory });
       return true;
     }
 

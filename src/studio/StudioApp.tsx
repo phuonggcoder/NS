@@ -936,6 +936,8 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
           (aiPanelOpen ? (
             <AiAssistantPanel
               spec={spec}
+              projectId={activeProject.id}
+              projectSlug={activeProject.slug}
               isPreviewing={Boolean(previewState)}
               previewLabel={previewState?.label}
               onStartPreview={(previewSpec, label, highlightSectionId) => {

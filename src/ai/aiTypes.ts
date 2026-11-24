@@ -12,6 +12,7 @@ import type {
 export type AiProviderMode = 'local' | 'gemini' | 'openai';
 
 export type AiCopyTask =
+  | 'holistic_audit'
   | 'website_copy'
   | 'product_desc'
   | 'menu_item_desc'
@@ -26,6 +27,59 @@ export interface AiServerStatus {
   configured: boolean;
   provider: AiProviderMode;
   model: string;
+}
+
+export interface BrandProfile {
+  industry: string;
+  tone: string;
+  audience: string;
+  usp: string;
+  forbiddenWords: string[];
+}
+
+export interface OptimizationLogEntry {
+  date: string;
+  topic: string;
+  status: 'accepted' | 'edited' | 'rejected';
+  note: string;
+}
+
+export interface AiBrandMemory {
+  brandProfile: BrandProfile;
+  learnedRules: string[];
+  optimizationLog: OptimizationLogEntry[];
+  updatedAt: string;
+}
+
+export interface AiHolisticRecommendation {
+  id: string;
+  priority: 'high' | 'medium' | 'low';
+  category: string;
+  title: string;
+  reason: string;
+  targetSectionType: string;
+  targetField: string;
+  currentValue: string;
+  suggestedValue: string;
+}
+
+export interface AiHolisticAuditResult {
+  ok: boolean;
+  providerUsed: AiProviderMode;
+  modelUsed: string;
+  summary: string;
+  recommendations: AiHolisticRecommendation[];
+  warning?: string;
+}
+
+export interface AiFeedbackPayload {
+  projectId: string;
+  taskType: string;
+  topic?: string;
+  aiOutput: string;
+  userFinalOutput?: string;
+  action: 'accepted' | 'edited' | 'rejected';
+  note?: string;
 }
 
 export interface AiCopyResult {
