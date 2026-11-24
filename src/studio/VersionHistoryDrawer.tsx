@@ -22,6 +22,7 @@ export function VersionHistoryDrawer({
   const [versions, setVersions] = useState<VersionRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
   const [label, setLabel] = useState('');
   const [scope, setScope] = useState<'both' | 'landing' | 'menu'>('both');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -86,6 +87,7 @@ export function VersionHistoryDrawer({
       return;
     }
 
+    setRestoringId(ver.id);
     setErrorMsg(null);
     try {
       const res = await fetch('/api/versions/restore', {
@@ -103,6 +105,8 @@ export function VersionHistoryDrawer({
       onClose();
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : 'Lỗi khôi phục.');
+    } finally {
+      setRestoringId(null);
     }
   };
 
@@ -224,10 +228,11 @@ export function VersionHistoryDrawer({
                       <button
                         type="button"
                         className="st-btn st-btn-sm st-btn-primary"
+                        disabled={restoringId !== null}
                         onClick={() => void handleRestore(ver)}
                       >
                         <RotateCcw size={13} />
-                        <span>Khôi phục</span>
+                        <span>{restoringId === ver.id ? 'Đang khôi phục...' : 'Khôi phục'}</span>
                       </button>
                     </div>
                   </div>

@@ -30,6 +30,7 @@ import {
   sanitizeSlug,
   savePublishedSite,
   storeGet,
+  storeGetStrict,
   storeSet,
 } from './server-store.mjs';
 
@@ -246,7 +247,8 @@ export async function handlePublishedAssetRequest(req, res, rootDir = process.cw
 async function saveVersionSnapshot({ slug, label, scope, spec, actor }, rootDir) {
   const safeSlug = sanitizeSlug(slug) || 'du-an-mau';
   const key = `versions:${safeSlug}`;
-  const existing = (await storeGet(key, [], rootDir)) || [];
+  const strict = await storeGetStrict(key, rootDir);
+  const existing = strict.found && Array.isArray(strict.value) ? strict.value : [];
   const entry = {
     id: `ver-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     slug: safeSlug,
@@ -256,7 +258,7 @@ async function saveVersionSnapshot({ slug, label, scope, spec, actor }, rootDir)
     scope: scope === 'menu' || scope === 'both' ? scope : 'landing',
     spec,
   };
-  const next = [entry, ...(Array.isArray(existing) ? existing : [])].slice(0, MAX_VERSIONS_PER_SLUG);
+  const next = [entry, ...existing].slice(0, MAX_VERSIONS_PER_SLUG);
   await storeSet(key, next, rootDir);
   return entry;
 }
@@ -473,7 +475,8 @@ export async function handleApiRequest(req, res, options = {}) {
       if (!(await requireAdmin(req, res, rootDir))) return true;
 
       if (req.method === 'GET') {
-        const stored = await storeGet('projects', null, rootDir);
+        const strict = await storeGetStrict('projects', rootDir);
+        const stored = strict.found ? strict.value : null;
         const projects = Array.isArray(stored?.projects)
           ? stored.projects.map((p) => (p && !p.reviewToken ? { ...p, reviewToken: generateReviewToken() } : p))
           : null;
@@ -582,8 +585,9 @@ export async function handleApiRequest(req, res, options = {}) {
         return true;
       }
 
-      const list = (await storeGet(`versions:${safeSlug}`, [], rootDir)) || [];
-      const target = Array.isArray(list) ? list.find((v) => v.id === versionId) : null;
+      const strictVer = await storeGetStrict(`versions:${safeSlug}`, rootDir);
+      const list = strictVer.found && Array.isArray(strictVer.value) ? strictVer.value : [];
+      const target = list.find((v) => v.id === versionId) || null;
       if (!target || !target.spec) {
         sendJson(res, 404, { ok: false, error: 'Không tìm thấy phiên bản này.' });
         return true;
@@ -591,7 +595,8 @@ export async function handleApiRequest(req, res, options = {}) {
 
       // Backup current state before restoring
       await backupStoreSnapshot(`pre-restore-${safeSlug}`, rootDir);
-      const projectsData = await storeGet('projects', null, rootDir);
+      const strictProj = await storeGetStrict('projects', rootDir);
+      const projectsData = strictProj.found ? strictProj.value : null;
       if (projectsData && Array.isArray(projectsData.projects)) {
         const currentProj = projectsData.projects.find((p) => p && p.slug === safeSlug);
         if (currentProj?.spec) {
@@ -726,34 +731,51 @@ export async function handleApiRequest(req, res, options = {}) {
         body?.action === 'edited' || body?.action === 'rejected' ? body.action : 'accepted';
       const topic = String(body?.topic || taskType).slice(0, 120);
 
-      let memory = await appendOptimizationLog(
-        projectId,
-        {
-          topic,
-          status: action,
-          note: body?.note || (action === 'accepted' ? 'Người dùng áp dụng trực tiếp' : ''),
-        },
-        rootDir
-      );
-
+      let memory = null;
       let learnedRule = '';
-      if (action === 'edited' || action === 'rejected') {
-        learnedRule = await extractLearnedRuleFromFeedback({
-          taskType,
-          aiOutput: body?.aiOutput || '',
-          userFinalOutput: body?.userFinalOutput || '',
-          action,
-          note: body?.note || '',
-          memory,
-        });
-        if (learnedRule) {
-          const updated = await appendLearnedRule(projectId, learnedRule, rootDir);
-          memory = updated.memory;
-          learnedRule = updated.rule;
+      let warning = '';
+
+      try {
+        memory = await appendOptimizationLog(
+          projectId,
+          {
+            topic,
+            status: action,
+            note: body?.note || (action === 'accepted' ? 'Người dùng áp dụng trực tiếp' : ''),
+          },
+          rootDir
+        );
+
+        if (action === 'edited' || action === 'rejected') {
+          learnedRule = await extractLearnedRuleFromFeedback({
+            taskType,
+            aiOutput: body?.aiOutput || '',
+            userFinalOutput: body?.userFinalOutput || '',
+            action,
+            note: body?.note || '',
+            memory,
+          });
+          if (learnedRule) {
+            const updated = await appendLearnedRule(projectId, learnedRule, rootDir);
+            memory = updated.memory;
+            learnedRule = updated.rule;
+          }
         }
+      } catch (err) {
+        warning =
+          err instanceof Error
+            ? `Đã ghi nhận thao tác nhưng tạm thời chưa lưu được vào Trí nhớ AI (${err.message}).`
+            : 'Tạm thời chưa lưu được vào Trí nhớ AI.';
       }
 
-      sendJson(res, 200, { ok: true, projectId, action, learnedRule, memory });
+      sendJson(res, 200, {
+        ok: true,
+        projectId,
+        action,
+        learnedRule,
+        memory,
+        ...(warning ? { warning } : {}),
+      });
       return true;
     }
 
@@ -789,7 +811,8 @@ export async function handleApiRequest(req, res, options = {}) {
         }
 
         const safeSlug = sanitizeSlug(body.clientSlug) || 'du-an-mau';
-        const projectsData = await storeGet('projects', null, rootDir);
+        const strictProj = await storeGetStrict('projects', rootDir);
+        const projectsData = strictProj.found ? strictProj.value : null;
         const targetProj = Array.isArray(projectsData?.projects)
           ? projectsData.projects.find((p) => p && p.slug === safeSlug)
           : null;
@@ -821,8 +844,9 @@ export async function handleApiRequest(req, res, options = {}) {
           type: feedbackType,
           resolved: false,
         };
-        const current = (await storeGet('feedback', [], rootDir)) || [];
-        const next = [entry, ...(Array.isArray(current) ? current : [])].slice(0, 300);
+        const strictFb = await storeGetStrict('feedback', rootDir);
+        const current = strictFb.found && Array.isArray(strictFb.value) ? strictFb.value : [];
+        const next = [entry, ...current].slice(0, 300);
         await storeSet('feedback', next, rootDir);
 
         let updatedStatus = targetProj?.status;
@@ -880,7 +904,8 @@ export async function handleApiRequest(req, res, options = {}) {
       if (req.method === 'POST') {
         if (!enforceRateLimit(req, res, 'public-submit', 20, 10 * 60 * 1000)) return true;
         const body = await readJsonBody(req, MAX_PUBLIC_BODY_BYTES);
-        const current = (await storeGet('orders', { orders: [], leads: [] }, rootDir)) || {
+        const strictOrd = await storeGetStrict('orders', rootDir);
+        const current = (strictOrd.found && strictOrd.value) || {
           orders: [],
           leads: [],
         };
@@ -962,8 +987,17 @@ export async function handleApiRequest(req, res, options = {}) {
     sendJson(res, 404, { ok: false, error: 'API endpoint không tồn tại.' });
     return true;
   } catch (err) {
-    const status = err && typeof err === 'object' && 'statusCode' in err ? err.statusCode : 500;
-    const message = err instanceof Error ? err.message : 'Lỗi máy chủ nội bộ.';
+    const rawMsg = err instanceof Error ? err.message : 'Lỗi máy chủ nội bộ.';
+    const isStorageError = /Upstash HTTP|Supabase HTTP|EACCES|EPERM|fetch failed/i.test(rawMsg);
+    const status =
+      err && typeof err === 'object' && 'statusCode' in err
+        ? err.statusCode
+        : isStorageError
+          ? 503
+          : 500;
+    const message = isStorageError
+      ? 'Lỗi kết nối bộ nhớ lưu trữ. Vui lòng thử lại sau ít giây.'
+      : rawMsg;
     sendJson(res, status, { ok: false, error: message });
     return true;
   }

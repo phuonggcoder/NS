@@ -4,13 +4,7 @@ import {
 } from './server-ai-memory.mjs';
 
 const AI_TIMEOUT_MS = 15000;
-const GEMINI_MODEL_FALLBACKS = [
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
-  'gemini-2.5-flash-lite',
-  'gemini-1.5-flash',
-];
+const GEMINI_MODEL_FALLBACKS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 const workingGeminiModelCache = new Map();
 
 function normalizeGeminiModelName(raw) {
@@ -24,7 +18,9 @@ export function getAiConfigFromEnv() {
   const openaiKey = (process.env.OPENAI_API_KEY || '').trim();
   const openaiBase = (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').trim();
   const geminiBase = (process.env.GEMINI_API_BASE_URL || 'https://generativelanguage.googleapis.com').trim();
-  const preferredModel = normalizeGeminiModelName(process.env.AI_MODEL || '');
+  const preferredModel = normalizeGeminiModelName(
+    process.env.GEMINI_MODEL || process.env.AI_MODEL || ''
+  );
 
   if (geminiKey) {
     return {
@@ -64,9 +60,7 @@ function stripJsonFences(raw) {
 
 async function invokeGeminiGenerate(base, apiKey, model, systemPrompt, userPrompt) {
   const cleanModel = normalizeGeminiModelName(model);
-  const url = `${base}/v1beta/models/${encodeURIComponent(
-    cleanModel
-  )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const url = `${base}/v1beta/models/${encodeURIComponent(cleanModel)}:generateContent`;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
@@ -74,7 +68,10 @@ async function invokeGeminiGenerate(base, apiKey, model, systemPrompt, userPromp
     const res = await fetch(url, {
       method: 'POST',
       signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
       body: JSON.stringify({
         systemInstruction: {
           parts: [{ text: systemPrompt }],
@@ -116,8 +113,11 @@ async function discoverGeminiGenerateModel(base, apiKey) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(`${base}/v1beta/models?key=${encodeURIComponent(apiKey)}`, {
+    const res = await fetch(`${base}/v1beta/models`, {
       signal: controller.signal,
+      headers: {
+        'x-goog-api-key': apiKey,
+      },
     });
     if (!res.ok) return null;
     const data = await res.json();

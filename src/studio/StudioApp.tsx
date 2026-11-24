@@ -118,6 +118,8 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const hydratedFromServerRef = useRef(false);
   const syncTimerRef = useRef<number | null>(null);
+  const syncSeqRef = useRef(0);
+  const skipNextAutosaveRef = useRef(false);
 
   // AI Workbench & Live Preview State
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
@@ -208,6 +210,7 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         const activeProj = res.projects.find((p) => p.id === nextActiveId) ?? res.projects[0];
         saveStoredSpec(activeProj.spec);
         applyProjectsState(res.projects, nextActiveId);
+        skipNextAutosaveRef.current = true;
         setHistory({ past: [], present: activeProj.spec, future: [] });
         setAiSuggestions(runLocalAudit(activeProj.spec));
         setLastPublishedUrl(activeProj.publishedUrl);
@@ -245,6 +248,13 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
       return;
     }
 
+    if (skipNextAutosaveRef.current) {
+      skipNextAutosaveRef.current = false;
+      setHasUnsavedChanges(false);
+      return;
+    }
+
+    const seq = ++syncSeqRef.current;
     setSyncStatus('saving');
     setHasUnsavedChanges(true);
     if (syncTimerRef.current !== null) {
@@ -254,6 +264,7 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
     syncTimerRef.current = window.setTimeout(() => {
       syncTimerRef.current = null;
       void saveProjectsToServer(nextProjects, targetActiveId).then((res) => {
+        if (seq !== syncSeqRef.current) return;
         if (res.unauthorized) {
           onLoggedOut?.();
           return;
@@ -311,8 +322,10 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
         syncTimerRef.current = null;
       }
       if (authStatus?.staticFallback) return;
+      const seq = ++syncSeqRef.current;
       setSyncStatus('saving');
       void saveProjectsToServer(projects, activeId).then((res) => {
+        if (seq !== syncSeqRef.current) return;
         if (res.unauthorized) {
           onLoggedOut?.();
           return;
@@ -335,12 +348,14 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
       syncTimerRef.current = null;
     }
     if (authStatus?.staticFallback) return false;
+    const seq = ++syncSeqRef.current;
     const { projects, activeProjectId } = projectsRef.current;
     const latestProjects = updateSpecInProject(projects, activeProjectId, spec);
     applyProjectsState(latestProjects, activeProjectId);
     saveStoredSpec(spec);
     setSyncStatus('saving');
     const res = await saveProjectsToServer(latestProjects, activeProjectId);
+    if (seq !== syncSeqRef.current) return res.ok;
     if (res.unauthorized) {
       onLoggedOut?.();
       return false;
@@ -636,6 +651,7 @@ export function StudioApp({ authStatus, onLoggedOut }: StudioAppProps) {
   const switchActiveProject = (project: ClientProject) => {
     setPreviewState(null);
     setActiveFocus(null);
+    skipNextAutosaveRef.current = true;
     setHistory({ past: [], present: project.spec, future: [] });
     setAiSuggestions(runLocalAudit(project.spec));
     setLastPublishedUrl(project.publishedUrl);

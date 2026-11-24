@@ -84,6 +84,38 @@ export function OrdersDrawer({
                   <div style={{ fontSize: 12.5, lineHeight: 1.55 }}>
                     <strong>Khách:</strong> {ord.customerName} · <strong>SĐT:</strong> {ord.phone}
                     {ord.email ? ` · ${ord.email}` : ''}
+                    {(ord.branch || ord.table) && (
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+                        {ord.branch && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              background: '#e0f2fe',
+                              color: '#0369a1',
+                            }}
+                          >
+                            Chi nhánh: {ord.branch}
+                          </span>
+                        )}
+                        {ord.table && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              fontWeight: 700,
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              background: '#fef3c7',
+                              color: '#b45309',
+                            }}
+                          >
+                            Bàn: {ord.table}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     {ord.note ? (
                       <div style={{ color: '#475569', marginTop: 4 }}>Ghi chú: {ord.note}</div>
                     ) : null}

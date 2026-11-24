@@ -822,7 +822,7 @@ body,
   transform: translateX(-50%);
   z-index: 120;
   padding: 10px 18px;
-  border-radius: 999px;
+  border-radius: 16px;
   background: #0f172a;
   color: #ffffff;
   font-size: 13px;
@@ -830,6 +830,9 @@ body,
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.28);
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100vw - 24px);
   gap: 8px;
 }
 
@@ -1055,6 +1058,11 @@ body,
   .st-modal {
     width: 98vw !important;
     max-height: 94vh !important;
+  }
+
+  .st-modal-head {
+    flex-wrap: wrap;
+    padding: 12px 14px;
   }
 
   .st-modal-body[style*="grid-template-columns"] {

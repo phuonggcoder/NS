@@ -167,6 +167,7 @@ export function TopBar({
         <button
           type="button"
           className={`st-btn st-btn-sm ${syncStatus === 'error' || syncStatus === 'offline' ? 'st-btn-danger' : ''}`}
+          disabled={syncStatus === 'saving'}
           onClick={onSaveNow}
           title={syncTitle}
         >
